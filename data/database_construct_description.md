@@ -1,0 +1,11 @@
+Methods
+Database description
+Antibiotic resistance gene (ARG) sequences were collected from five databases: the Comprehensive Antibiotic Resistance Database (CARD), AMRFinder, the Structured Antibiotic Resistance Gene database (SARG), MegaRes, and ResFinder. All single-nucleotide polymorphism (SNP) variants were removed, yielding a total of 37,287 ARG sequences. Redundant sequences were removed by clustering using MMseqs2 at 100% sequence identity with full-length coverage, resulting in 17,345 non-redundant sequences. All sequences were manually curated, and antibiotic drug classifications were standardized according to CARD ontology terms. Unique classifications from each database were retained, and the final dataset was categorized into 30 antibiotic resistance classes. 
+
+
+
+
+Results
+Antibiotic resistance gene (ARG) sequences were collected from five publicly available databases: the Comprehensive Antibiotic Resistance Database (CARD), AMRFinder, the Structured Antibiotic Resistance Gene database (SARG), MegaRes, and ResFinder. After removing all single-nucleotide polymorphism (SNP) variants, a total of 37,287 ARG sequences were obtained. Redundant sequences were subsequently eliminated by clustering with MMseqs2 at 100% sequence identity and full-length coverage, resulting in 17,345 non-redundant sequences. All sequences were manually curated, and antibiotic resistance annotations were standardized according to CARD ontology terms.
+
+A total of 17,345 unique sequences were curated and calibrated to serve as the foundational dataset for model training and testing. These sequences were partitioned into 30 functional categories: 27 labels were assigned based on antibiotic drug class, one was categorized by resistance mechanisms, and two additional classes represented disinfecting agents.The most prevalent category is beta-lactam resistance, which accounts for the largest share of sequences (n = 7,336; 42.3%). This is followed by multidrug resistance genes (n = 3,548; 20.5%) and MLS (Macrolide-Lincosamide-Streptogramin) resistance (n = 1,814;10.5%). Together, these three classes represent the vast majority of the identified ARG sequences in the dataset.
