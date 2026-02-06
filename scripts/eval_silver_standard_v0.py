@@ -285,9 +285,15 @@ def main() -> int:
 
     merged: List[Dict[str, str]] = []
     ref_counts = Counter()
+    q_in_hits = 0
 
     for q, r in bin_rows.items():
-        ref = silver.get(q, {"ref_label": "unlabeled", "ref_class": "", "ref_best_s": ""})
+        # 注意：DIAMOND/MMseqs2 的 TSV 默认不会输出“无命中”的 query。
+        # 对于 silver standard v0 的 strict non-ARG 定义，“没有任何 relaxed 命中”应标为 non-ARG。
+        # 因此：若某条 query 不在 hits TSV 中，默认标为 non-ARG（而不是 unlabeled）。
+        ref = silver.get(q, {"ref_label": "non-ARG", "ref_class": "", "ref_best_s": ""})
+        if q in silver:
+            q_in_hits += 1
         ref_label = ref["ref_label"]
         ref_class = ref["ref_class"]
         ref_best_s = ref["ref_best_s"]
@@ -321,6 +327,7 @@ def main() -> int:
         for row in merged:
             w.writerow(row)
 
+    print("[silver] queries in hits TSV:", len(silver), "matched_to_binary_ids:", q_in_hits, "binary_total:", len(bin_rows))
     print("[silver] label counts:", dict(ref_counts))
     print("[out] merged csv:", args.out)
 
@@ -392,4 +399,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

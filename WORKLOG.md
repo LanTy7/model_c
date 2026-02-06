@@ -90,3 +90,8 @@
   - `EVAL_PROTOCOL.md`：新增 silver standard 阈值版本 v0。
   - `scripts/eval_silver_standard_v0.py`：新增；实现 v0 阈值、合并二分类/多分类输出并计算二分类与条件多分类指标。
 
+## 2026-02-06 修复：hits TSV 未包含“无命中 query”导致的错误标注
+
+- 问题：DIAMOND/MMseqs2 的 TSV 默认不输出无命中 query，旧逻辑会把这类序列默认标为 `unlabeled`，从而低估 `non-ARG` 数量并导致二分类评估集合异常偏小。
+- 变更：
+  - `scripts/eval_silver_standard_v0.py`：将“不在 hits TSV 中的 query”默认标为 `non-ARG`（符合 v0 的 strict non-ARG 定义），并增加命中覆盖统计输出。
