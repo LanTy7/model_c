@@ -72,3 +72,13 @@
 - 问题：`binary/model_train/train.ipynb` 使用 `logging.basicConfig` + `logger.info`，在部分 Jupyter 环境中可能因为已有 handler 导致 `basicConfig` 不生效，从而看不到训练日志输出。
 - 变更：
   - `binary/model_train/train.ipynb`：改为显式配置独立 logger `binary_train`（输出到 stdout），确保 epoch 日志可见且不重复。
+
+## 2026-02-06 推理脚本对齐训练结构（用于真实性能评估 B）
+
+- 目标：保证推理脚本与训练结构一致，并输出“全量预测分数”，以支持 silver standard 对比评估。
+- 变更：
+  - `binary/model_test/predict.ipynb`
+    - 新增 `INPUT_PATH`（支持只跑单文件 smoke test）。
+    - 输出全量预测分数 CSV（`*_scores.csv`），并可选输出预测为 ARG 的 FASTA（`*_pred.fasta`）供多分类使用。
+  - `multi/model_test/classify.ipynb`
+    - 模型 forward 改为 masked pooling（与训练一致，避免 PAD 污染）。

@@ -48,3 +48,4 @@
   - 做同源泄漏控制（`seen-like` vs `novel-like` 或按来源 holdout）。
 3. 二分类阴性集流水线（论文可写）：
   - 阴性去污染 + 长度分布匹配 + hard negatives。
+
