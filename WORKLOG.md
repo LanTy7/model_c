@@ -67,6 +67,12 @@
 - 用法（示例）：
   - `python scripts/clean_faa_strip_stop.py --in YOUR.faa --out YOUR.cleaned.faa`
 
+## 2026-02-06 增强：`clean_faa_strip_stop.py` 支持目录批处理
+
+- 背景：真实测试数据由大量 `.faa` 文件组成，逐文件手工清理效率低。
+- 变更：
+  - `scripts/clean_faa_strip_stop.py`：支持 `--in DIR --out DIR`，可选 `--recursive`、`--ext`、`--suffix`。
+
 ## 2026-02-06 二分类训练日志可见性修复（Jupyter logging）
 
 - 问题：`binary/model_train/train.ipynb` 使用 `logging.basicConfig` + `logger.info`，在部分 Jupyter 环境中可能因为已有 handler 导致 `basicConfig` 不生效，从而看不到训练日志输出。
