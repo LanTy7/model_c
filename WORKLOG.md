@@ -66,3 +66,9 @@
   - `scripts/clean_faa_strip_stop.py`：新增；默认去掉末尾连续 `*`，并可配置内部 `*` 的处理策略。
 - 用法（示例）：
   - `python scripts/clean_faa_strip_stop.py --in YOUR.faa --out YOUR.cleaned.faa`
+
+## 2026-02-06 二分类训练日志可见性修复（Jupyter logging）
+
+- 问题：`binary/model_train/train.ipynb` 使用 `logging.basicConfig` + `logger.info`，在部分 Jupyter 环境中可能因为已有 handler 导致 `basicConfig` 不生效，从而看不到训练日志输出。
+- 变更：
+  - `binary/model_train/train.ipynb`：改为显式配置独立 logger `binary_train`（输出到 stdout），确保 epoch 日志可见且不重复。
