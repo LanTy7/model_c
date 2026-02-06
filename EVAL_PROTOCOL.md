@@ -11,7 +11,7 @@
 
 ### v0（高置信，默认推荐）
 
-- strict ARG：
+- strict ARG（full-length 模式，适用于全长蛋白库评估）：
   - `evalue <= 1e-10`
   - `pident >= 80`
   - `min(qcov, scov) >= 0.80`
@@ -24,6 +24,23 @@
     - `min(qcov, scov) >= 0.50`
 - 其它：
   - `unlabeled`（建议主评估先 exclude；可另做敏感性分析将其当作 non-ARG）
+
+### v0-orF（高置信，适用于 ORF 片段/contig 上预测蛋白）
+
+说明：ORF 可能是截断片段，`scov` 往往较低；此时更合理的做法是以 `qcov` 为主并放宽 `scov`。
+
+- strict ARG（orf 模式）：
+  - `evalue <= 1e-10`
+  - `pident >= 80`
+  - `qcov >= 0.80`
+  - `scov >= 0.30`
+- strict non-ARG（orf 模式）：
+  - relaxed 阈值下完全无命中才标 `non-ARG`
+  - relaxed：
+    - `evalue <= 1e-5`
+    - `pident >= 30`
+    - `qcov >= 0.50`
+    - `scov >= 0.20`
 
 ## 1. 测试目标与输入
 

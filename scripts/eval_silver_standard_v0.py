@@ -47,6 +47,15 @@ def parse_args() -> argparse.Namespace:
         default="exclude",
         help="二分类评估时如何处理 unlabeled：exclude(默认) / as_nonarg",
     )
+    p.add_argument(
+        "--mode",
+        choices=["full", "orf"],
+        default="full",
+        help=(
+            "覆盖度阈值模式：full(默认，适用于全长蛋白；使用 min(qcov,scov)) / "
+            "orf(适用于 contig 上预测的 ORF 片段；使用 qcov 为主并放宽 scov)"
+        ),
+    )
     return p.parse_args()
 
 
@@ -136,11 +145,17 @@ def parse_hits_tsv(path: str) -> List[Hit]:
     return hits
 
 
-def is_strict_arg(h: Hit) -> bool:
+def is_strict_arg(h: Hit, mode: str) -> bool:
+    if mode == "orf":
+        # ORF 可能是截断片段：要求 query 基本被覆盖，同时放宽 subject 覆盖
+        return (h.evalue <= 1e-10) and (h.pident >= 80.0) and (h.qcov >= 0.80) and (h.scov >= 0.30)
+    # full-length：更严格，使用 min 覆盖
     return (h.evalue <= 1e-10) and (h.pident >= 80.0) and (h.mincov >= 0.80)
 
 
-def is_relaxed_hit(h: Hit) -> bool:
+def is_relaxed_hit(h: Hit, mode: str) -> bool:
+    if mode == "orf":
+        return (h.evalue <= 1e-5) and (h.pident >= 30.0) and (h.qcov >= 0.50) and (h.scov >= 0.20)
     return (h.evalue <= 1e-5) and (h.pident >= 30.0) and (h.mincov >= 0.50)
 
 
@@ -152,6 +167,7 @@ def choose_best_hit(hits: List[Hit]) -> Hit:
 def build_silver_labels(
     hits: List[Hit],
     subj2class: Dict[str, str],
+    mode: str,
 ) -> Dict[str, Dict[str, str]]:
     """
     return:
@@ -167,8 +183,8 @@ def build_silver_labels(
 
     out: Dict[str, Dict[str, str]] = {}
     for q, hs in by_q.items():
-        strict = [h for h in hs if is_strict_arg(h)]
-        relaxed = [h for h in hs if is_relaxed_hit(h)]
+        strict = [h for h in hs if is_strict_arg(h, mode)]
+        relaxed = [h for h in hs if is_relaxed_hit(h, mode)]
 
         if strict:
             # map to classes (unknown subject -> empty class)
@@ -264,7 +280,7 @@ def main() -> int:
     class_names = try_load_class_names_from_ckpt(args.multi_ckpt) or []
 
     hits = parse_hits_tsv(args.hits)
-    silver = build_silver_labels(hits, subj2class)
+    silver = build_silver_labels(hits, subj2class, mode=args.mode)
 
     bin_rows = read_binary_scores(args.binary_csv)
     multi_rows = read_multi_preds(args.multi_csv)
@@ -327,6 +343,7 @@ def main() -> int:
         for row in merged:
             w.writerow(row)
 
+    print("[silver] mode:", args.mode)
     print("[silver] queries in hits TSV:", len(silver), "matched_to_binary_ids:", q_in_hits, "binary_total:", len(bin_rows))
     print("[silver] label counts:", dict(ref_counts))
     print("[out] merged csv:", args.out)

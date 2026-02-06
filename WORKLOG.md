@@ -95,3 +95,10 @@
 - 问题：DIAMOND/MMseqs2 的 TSV 默认不输出无命中 query，旧逻辑会把这类序列默认标为 `unlabeled`，从而低估 `non-ARG` 数量并导致二分类评估集合异常偏小。
 - 变更：
   - `scripts/eval_silver_standard_v0.py`：将“不在 hits TSV 中的 query”默认标为 `non-ARG`（符合 v0 的 strict non-ARG 定义），并增加命中覆盖统计输出。
+
+## 2026-02-06 silver standard 增强：增加 ORF 模式（v0-orF）
+
+- 背景：真实测试数据来自 contig 上预测 ORF，常见截断导致 `scov` 偏低；若仍使用 `min(qcov,scov)` 容易出现 strict ARG=0 的情况。
+- 变更：
+  - `scripts/eval_silver_standard_v0.py`：新增 `--mode {full,orf}`，`orf` 模式以 `qcov` 为主并放宽 `scov`。
+  - `EVAL_PROTOCOL.md`：新增 `v0-orF` 阈值说明。
