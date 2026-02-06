@@ -82,3 +82,11 @@
     - 输出全量预测分数 CSV（`*_scores.csv`），并可选输出预测为 ARG 的 FASTA（`*_pred.fasta`）供多分类使用。
   - `multi/model_test/classify.ipynb`
     - 模型 forward 改为 masked pooling（与训练一致，避免 PAD 污染）。
+
+## 2026-02-06 silver standard v0：评估脚本落地
+
+- 目标：把“B 真实性能评估”跑通：同源 hits -> 参考标签(silver standard) -> 合并模型输出 -> 计算指标。
+- 变更：
+  - `EVAL_PROTOCOL.md`：新增 silver standard 阈值版本 v0。
+  - `scripts/eval_silver_standard_v0.py`：新增；实现 v0 阈值、合并二分类/多分类输出并计算二分类与条件多分类指标。
+

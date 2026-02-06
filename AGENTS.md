@@ -21,6 +21,7 @@
 - 工具脚本：
   - 阴性长度匹配采样：`scripts/sample_len_matched_neg.py`
   - 清理 `.faa` 末尾 `*`：`scripts/clean_faa_strip_stop.py`
+  - silver standard 评估（B）：`scripts/eval_silver_standard_v0.py`
 - 评估方法学（论文可复现协议）：`EVAL_PROTOCOL.md`
 - 工作与实验日志（按时间追加）：`WORKLOG.md`
 
@@ -48,4 +49,3 @@
   - 做同源泄漏控制（`seen-like` vs `novel-like` 或按来源 holdout）。
 3. 二分类阴性集流水线（论文可写）：
   - 阴性去污染 + 长度分布匹配 + hard negatives。
-

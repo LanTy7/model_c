@@ -7,6 +7,24 @@
 - 本文档描述的是“论文方法学级别”的评估协议：阈值、规则与分组一旦确定，后续对比实验应保持一致。
 - 如需调整阈值（identity/coverage/e-value 等），必须在 `WORKLOG.md` 记录，并在论文中明确说明。
 
+## 阈值版本（silver standard）
+
+### v0（高置信，默认推荐）
+
+- strict ARG：
+  - `evalue <= 1e-10`
+  - `pident >= 80`
+  - `min(qcov, scov) >= 0.80`
+  - 多分类参考：取 strict ARG 命中的 best-hit（推荐 `bitscore` 最大）
+- strict non-ARG：
+  - relaxed 阈值下完全无命中才标 `non-ARG`
+  - relaxed：
+    - `evalue <= 1e-5`
+    - `pident >= 30`
+    - `min(qcov, scov) >= 0.50`
+- 其它：
+  - `unlabeled`（建议主评估先 exclude；可另做敏感性分析将其当作 non-ARG）
+
 ## 1. 测试目标与输入
 
 - 目标：在真实 contig/基因组片段上，经 ORF 预测得到的蛋白序列（`.faa`）中，完成：
