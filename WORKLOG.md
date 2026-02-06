@@ -73,6 +73,12 @@
 - 变更：
   - `scripts/clean_faa_strip_stop.py`：支持 `--in DIR --out DIR`，可选 `--recursive`、`--ext`、`--suffix`。
 
+## 2026-02-06 增强：根据 prescreen CSV 批量清理抽样文件
+
+- 目标：从 `results/prescreen_*.csv` 中读取抽样到的 `.faa` 文件列表，仅清理这一小批文件，避免全量复制。
+- 变更：
+  - `scripts/clean_faa_from_prescreen_csv.py`：新增；支持按 `strict_q` 过滤、跳过 error 行，输出到指定目录。
+
 ## 2026-02-06 二分类训练日志可见性修复（Jupyter logging）
 
 - 问题：`binary/model_train/train.ipynb` 使用 `logging.basicConfig` + `logger.info`，在部分 Jupyter 环境中可能因为已有 handler 导致 `basicConfig` 不生效，从而看不到训练日志输出。
