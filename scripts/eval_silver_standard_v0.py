@@ -42,6 +42,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--multi-ckpt", default="", help="多分类 ckpt .pth（可选，用于类别体系对齐/映射到 Others）")
     p.add_argument("--out", required=True, help="输出合并后的评估明细 CSV")
     p.add_argument(
+        "--file-name",
+        default="",
+        help="只评估指定 FileName（可选；用于从汇总 CSV 中筛出单个 .faa 的结果）",
+    )
+    p.add_argument(
         "--unlabeled",
         choices=["exclude", "as_nonarg"],
         default="exclude",
@@ -210,22 +215,25 @@ def read_binary_scores(path: str) -> Dict[str, Dict[str, str]]:
     with open(path, "r", encoding="utf-8") as f:
         r = csv.DictReader(f)
         for row in r:
+            if "SequenceID" not in row:
+                continue
             q = row["SequenceID"]
             m[q] = row
     return m
 
 
-def read_multi_preds(path: str) -> Dict[str, Dict[str, str]]:
-    m: Dict[str, Dict[str, str]] = {}
+def read_multi_preds(path: str) -> Dict[Tuple[str, str], Dict[str, str]]:
+    m: Dict[Tuple[str, str], Dict[str, str]] = {}
     if not path:
         return m
     with open(path, "r", encoding="utf-8") as f:
         r = csv.DictReader(f)
         for row in r:
+            file_name = row.get("FileName", "")
             q = row.get("SequenceID") or row.get("seq_id") or row.get("id")
             if not q:
                 continue
-            m[q] = row
+            m[(file_name, q)] = row
     return m
 
 
@@ -306,6 +314,9 @@ def main() -> int:
     q_in_hits = 0
 
     for q, r in bin_rows.items():
+        file_name = r.get("FileName", "")
+        if args.file_name and file_name != args.file_name:
+            continue
         # 注意：DIAMOND/MMseqs2 的 TSV 默认不会输出“无命中”的 query。
         # 对于 silver standard v0 的 strict non-ARG 定义，“没有任何 relaxed 命中”应标为 non-ARG。
         # 因此：若某条 query 不在 hits TSV 中，默认标为 non-ARG（而不是 unlabeled）。
@@ -321,7 +332,7 @@ def main() -> int:
             if "Others" in class_names:
                 ref_class = "Others"
 
-        m = multi_rows.get(q, {})
+        m = multi_rows.get((file_name, q), {})
         mp = m.get("PredictedClass", "")
         mprob = m.get("Probability", "")
 
