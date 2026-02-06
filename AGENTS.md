@@ -22,6 +22,7 @@
   - 阴性长度匹配采样：`scripts/sample_len_matched_neg.py`
   - 清理 `.faa` 末尾 `*`：`scripts/clean_faa_strip_stop.py`
   - silver standard 评估（B）：`scripts/eval_silver_standard_v0.py`
+  - 预筛选含 ARG 的 `.faa`（N=50 抽样）：`scripts/prescreen_faa_for_arg.py`
 - 评估方法学（论文可复现协议）：`EVAL_PROTOCOL.md`
 - 工作与实验日志（按时间追加）：`WORKLOG.md`
 

@@ -301,6 +301,8 @@ def main() -> int:
 
     merged: List[Dict[str, str]] = []
     ref_counts = Counter()
+    predpos_by_ref = Counter()
+    predpos_total = 0
     q_in_hits = 0
 
     for q, r in bin_rows.items():
@@ -336,6 +338,9 @@ def main() -> int:
         }
         merged.append(row)
         ref_counts[ref_label] += 1
+        if safe_int(row["ARG_Pred"], 0) == 1:
+            predpos_total += 1
+            predpos_by_ref[ref_label] += 1
 
     with open(args.out, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
@@ -346,6 +351,7 @@ def main() -> int:
     print("[silver] mode:", args.mode)
     print("[silver] queries in hits TSV:", len(silver), "matched_to_binary_ids:", q_in_hits, "binary_total:", len(bin_rows))
     print("[silver] label counts:", dict(ref_counts))
+    print("[binary] predicted_positive_total:", predpos_total, "predpos_by_ref:", dict(predpos_by_ref))
     print("[out] merged csv:", args.out)
 
     # Binary metrics on strict set
@@ -373,6 +379,8 @@ def main() -> int:
     print("\n[binary] evaluated_n =", len(y_true), f"(unlabeled={args.unlabeled})")
     print("[binary] cm =", cm)
     print("[binary] metrics =", {k: round(v, 6) for k, v in m.items()})
+    if cm["tp"] == 0 and cm["fn"] == 0:
+        print("[binary] warning: 当前 silver standard 下 strict ARG=0，无法评估召回率；此文件只能用于估计假阳性率。")
 
     # Optional AUCs if sklearn available
     try:

@@ -102,3 +102,9 @@
 - 变更：
   - `scripts/eval_silver_standard_v0.py`：新增 `--mode {full,orf}`，`orf` 模式以 `qcov` 为主并放宽 `scov`。
   - `EVAL_PROTOCOL.md`：新增 `v0-orF` 阈值说明。
+
+## 2026-02-06 真实评估集构建：预筛选含 ARG 的 `.faa` 文件（随机抽样 N）
+
+- 背景：单个真实 `.faa` 可能在 strict 阈值下没有 ARG，导致只能评估假阳性率，无法评估召回与端到端分类。
+- 变更：
+  - `scripts/prescreen_faa_for_arg.py`：新增；从目录随机抽样 N 个 `.faa`，逐文件运行 DIAMOND 并统计 strict/relaxed 命中 query 数，输出 top 列表与汇总 CSV。
