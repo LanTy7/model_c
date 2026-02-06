@@ -2,6 +2,11 @@
 
 说明：本文件用于记录每一次“会影响结果复现/对比”的代码改动与实验结果，便于后续写论文、做 ablation、做对比实验时快速回溯。
 
+## 约定（简短）
+
+- 本文件按时间倒序或顺序追加均可，但同一项目内请保持一致（推荐顺序追加）。
+- 每条记录尽量只写“改了什么 + 为什么 + 结果 + 下一步”，避免长篇叙述。
+
 ## 2026-02-05 06:30 多分类 v1.1（数据解析与评估可靠性增强）
 
 - 目标：修复多分类标签解析导致的数据丢失；减少路径踩坑；提升训练/评估的可信度与可复现性。
@@ -38,4 +43,19 @@
   - `min_samples=30` 的 `Others` 表现相对最好（F1=0.81），适合作为后续继续优化的默认设定候选。
 - 下一步：
   - 固化一个论文/对比实验用的类别体系（建议先以 `min_samples=30` 继续迭代），再推进更严格的泛化评估（例如按数据库来源做 holdout）。
+
+## 2026-02-05 08:05 增加“真实场景测试与验证协议”文档
+
+- 目标：把真实数据（`.faa`，Prodiagal ORF）上的测试流程写成可复现、可量化、可写入论文的方法学。
+- 变更：
+  - `AGENTS.md`：增加“评估协议”入口与原则说明。
+  - `EVAL_PROTOCOL.md`：新增；定义 case study 与真实性能评估的区别、参考标签构建（silver standard）、阈值与规则、避免同源泄漏、指标与端到端分解等。
+
+## 2026-02-06 采样脚本：阴性集按长度分布匹配抽样（v0）
+
+- 目标：从超大阴性 `.faa` 中按阳性长度分布分层抽样，生成二分类训练用阴性集（快速跑通 v0 训练）。
+- 变更：
+  - `scripts/sample_len_matched_neg.py`：新增；标准库实现，按长度 bin 做 reservoir sampling（流式读取大文件）。
+- 用法（示例）：
+  - `python scripts/sample_len_matched_neg.py --pos data/ARG_db_all_seq_uniq_representative_rename_2_repsent.fasta --neg YOUR_NEG.faa --out data/non_arg_lenmatch_r3_seed42.fasta --ratio 3 --max-len 1000 --bin-size 50 --seed 42`
 

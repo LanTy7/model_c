@@ -1,104 +1,49 @@
-# 项目协作备忘（ARG 识别与分类）
+# 项目导航（ARG 识别与分类）
 
-本文件用于记录我们双方已对齐的项目背景、当前仓库状态、已发现的问题与修复优先级，以及后续迭代计划（例如 v1.0 -> v1.1 -> v1.2）。  
-约定：**后续往本文件新增/更新内容一律使用中文。**
+本文件定位为“指挥官/地图”：只保留**重要入口、关键约定、当前状态摘要、下一步路线**。细节分别解耦到独立文档中。  
+约定：**本仓库内协作文档新增/更新一律使用中文。**
 
-## 目标
+## 目标（一句话版）
 
-- 任务A（二分类）：对全长氨基酸序列进行 ARG 识别（是否为 ARG）。
-- 任务B（多分类）：对识别出的 ARG 序列进行类别预测（属于哪个抗性基因类别）。
-- 目标：达到科研论文级别的高性能，并能在真实测试/对比实验中站得住脚。
+对全长氨基酸序列进行 ARG 二分类识别，并对 ARG 进行多分类定类；追求论文级可复现与强泛化表现。
 
-## 当前仓库结构
+## 快速入口（你要去哪儿看什么）
 
-- `binary/model_train/train.ipynb`：二分类训练（BiLSTM）。
-- `binary/model_test/predict.ipynb`：二分类推理（从输入文件夹筛出预测为 ARG 的序列并输出 FASTA）。
-- `multi/model_train/train.ipynb`：多分类训练（BiLSTM）。
-- `multi/model_test/classify.ipynb`：多分类推理（对预测为 ARG 的序列进行类别分类）。
-- `data/ARG_db_all_seq_uniq_representative_rename_2_repsent.fasta`：整理好的 ARG 数据集（用于多分类；也可作为二分类阳性集）。
-- `data/database_construct_description.md`：数据集构建说明（CARD/AMRFinder/SARG/MegaRes/ResFinder；去 SNP；MMseqs2 100% identity 去冗余；最终 30 类）。
+- 训练代码：
+  - 二分类：`binary/model_train/train.ipynb`
+  - 多分类：`multi/model_train/train.ipynb`
+- 推理代码：
+  - 二分类：`binary/model_test/predict.ipynb`
+  - 多分类：`multi/model_test/classify.ipynb`
+- 主要数据：
+  - ARG 数据库：`data/ARG_db_all_seq_uniq_representative_rename_2_repsent.fasta`
+  - 数据说明：`data/database_construct_description.md`
+- 工具脚本：
+  - 阴性长度匹配采样：`scripts/sample_len_matched_neg.py`
+- 评估方法学（论文可复现协议）：`EVAL_PROTOCOL.md`
+- 工作与实验日志（按时间追加）：`WORKLOG.md`
 
-## 数据集要点（基于本地快速扫描 `data/*.fasta`）
+## 关键约定（影响复现与结论）
 
-- 文件：`data/ARG_db_all_seq_uniq_representative_rename_2_repsent.fasta`
-- 序列数：17,345
-- 类别数：30（类别名位于 FASTA header 的最后一个 `|...|label` 字段）
-- 类别分布严重不均衡（头部大类包括 `beta-lactam`、`multidrug`、`MLS` 等）
-- 序列长度分布（约）：p95 ~ 657 aa；最大长度 ~ 1576 aa
-- 小样本类别很多：有 17 个类别样本数 <= 50
+- 任何影响复现/对比的变更（代码、数据处理、训练配置、评估协议）必须追加记录到 `WORKLOG.md`。
+- 真实场景测试：必须区分 `case study` 与“可量化真实性能评估”；细则见 `EVAL_PROTOCOL.md`。
+- 多分类允许将极小类合并为 `Others`（`min_samples`），但需要在论文中明确类别体系与阈值。
+- 环境：训练在 conda `dl_env` 运行；最终模型确定后再导出环境文件。
 
-## 当前模型实现（v1.0）
+## 当前状态摘要（我们已经做到了什么）
 
-### 二分类（ARG vs non-ARG）
+- 多分类训练已完成关键可靠性修复与增强（细节与指标见 `WORKLOG.md`）：
+  - 修复 label 解析（兼容不同 FASTA header 风格，避免静默丢数据）。
+  - 引入 masked pooling（避免 PAD 污染 pooling）。
+  - 引入 `Macro-F1` 并用于早停与最佳模型保存。
+  - 图/产物按 run 命名保存，避免覆盖。
+- 已完成 `min_samples` 扫参（20/30/40/50），用于评估“类别粒度 vs 指标”的关系（详细结果见 `WORKLOG.md`）。
 
-- 输入：索引编码，PAD=0，X=21，`vocab_size=22`；固定 `max_length=1000`。
-- 模型：Embedding -> BiLSTM ->（全局 max pooling + 全局 avg pooling）-> MLP -> 输出 1 个 logit。
-- 损失函数：`BCEWithLogitsLoss(pos_weight=neg/pos)`。
-- 阴性样本：按 `pos_neg_ratio=3` 抽样（注意：当前阴性 FASTA 尚未放入本仓库）。
-- 早停：监控 `val_loss`。
-- 学习率调度：`ReduceLROnPlateau`（监控 `val_loss`）。
+## 下一步路线（优先级从高到低）
 
-### 多分类（ARG 类别）
-
-- 输入：one-hot（20 种氨基酸 + PAD）；B/Z/J 做均分；X/未知字符做均匀分布。
-- 模型：BiLSTM ->（全局 max pooling + 全局 avg pooling）-> MLP -> logits。
-- 损失函数：Focal Loss + Label Smoothing + 类别权重（clamp）。
-- 学习率调度：warmup + cosine（按 batch 更新）。
-- 早停：监控 `val_acc`。
-- 备注：当前代码允许通过 `min_samples` 将极少数类别合并为 `Others`。
-
-## 已知关键问题（在相信指标前必须修复）
-
-1. Notebook 中存在硬编码数据路径，指向其他机器/目录。
-  - 风险：可能在“你以为训练A数据，但实际读到B数据”，或者在干净环境下无法复现运行。
-2. 多分类标签解析存在缺陷（会静默丢数据）。
-  - 当前逻辑对 `record.description` 以 `|` 分割并取 `parts[3]`。
-  - 部分 header（例如 SARG 风格）字段数更少，会被直接跳过，导致训练集变小且类别分布变形。
-  - 建议修复：类别统一取最后字段 `parts[-1]`。
-3. 运行环境不一致（终端与 notebook 环境不一致）。
-  - 终端当前 `python` 缺少关键依赖（例如 `numpy`、`biopython`）。
-  - 实际训练使用 conda 环境 `dl_env`（暂不导出，等最终模型确定再导出）。
-
-## 已对齐的决策
-
-- 二分类阴性集：
-  - 当前阴性集来源于抽取的细菌氨基酸序列（阴性文件尚未纳入本仓库）。
-  - 方向可行，但必须“更干净、更难”，否则验证指标可能虚高且泛化不稳。
-- 多分类：
-  - 允许将极小类合并为 `Others`。
-  - 注意：若 `min_samples=50`，此数据上可能会把 30 类中的 17 类合并进 `Others`；可考虑更小阈值（如 10 或 20）以保留细粒度能力。
-- 环境导出：
-  - 等最终模型训练完成后再导出 `dl_env`（例如 `environment.yml`/`requirements.txt`）。
-
-## v1.1 推荐路线（高收益、低风险）
-
-1. 修复多分类 label 解析，避免静默丢数据。
-2. 将硬编码路径替换为仓库相对路径默认值（或清晰的 `PATH_CONFIG` 覆盖方式）。
-3. 构建可写进论文的二分类阴性集流水线：
-  - 阴性去污染：过滤与已知 ARG 同源的序列（例如 identity >= 30% 且 coverage >= 70%，或更严格）。
-  - 阴阳性长度分布匹配：避免模型走“长度捷径”。
-  - 加入 hard negatives：选择更容易混淆的非 ARG 蛋白（同样需先去污染）。
-4. 固化评估协议（论文可信度）：
-  - 分层划分、固定随机种子。
-  - 二分类报告 AUC/PR-AUC/F1 等；多分类报告 macro-F1/更平衡的指标，并给出混淆矩阵等分析。
-
-## 日志与记录（规则）
-
-- 本项目采用“协作备忘 + 工作日志”两层记录：
-  - `AGENTS.md`：记录稳定的共识、约定、流程规则、长期路线图（不记录每次跑出来的具体指标细节）。
-  - `WORKLOG.md`：专门记录每一次代码改动与实验结果（可追溯、可复现）。
-- 约定：任何会影响结果复现/对比的变更（代码、数据处理、训练配置、评估协议）都必须追加写入 `WORKLOG.md`。
-
-## `WORKLOG.md` 记录模板（尽量简洁）
-
-- 时间：`YYYY-MM-DD HH:MM`（必要）
-- 标题：一句话说明本次迭代目的（例如“修复多分类标签解析 + 引入 Macro-F1 早停”）
-- 变更：
-  - 文件：列出修改过的文件路径
-  - 要点：每个文件 1-3 条，说明改了什么（避免长篇大论）
-- 实验：
-  - 数据：使用的数据文件（关键路径/版本）
-  - 配置：关键超参（例如 `min_samples`、batch、lr、max_length）
-  - 结果：最重要的 2-4 个指标（例如 overall acc / macro-f1 / Others F1）
-- 结论/下一步：一句话结论 + 下一步动作
-
+1. 固化论文/对比实验采用的类别体系（确定 `min_samples` 与最终 `num_classes`），并在后续迭代中保持一致。
+2. 按 `EVAL_PROTOCOL.md` 落地真实性能评估：
+  - 给全部 ORF 构建 silver standard 参考标签，统计假阴性/真召回。
+  - 做同源泄漏控制（`seen-like` vs `novel-like` 或按来源 holdout）。
+3. 二分类阴性集流水线（论文可写）：
+  - 阴性去污染 + 长度分布匹配 + hard negatives。
