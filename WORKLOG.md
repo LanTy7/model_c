@@ -59,3 +59,10 @@
 - 用法（示例）：
   - `python scripts/sample_len_matched_neg.py --pos data/ARG_db_all_seq_uniq_representative_rename_2_repsent.fasta --neg YOUR_NEG.faa --out data/non_arg_lenmatch_r3_seed42.fasta --ratio 3 --max-len 1000 --bin-size 50 --seed 42`
 
+## 2026-02-06 工具脚本：清理 `.faa` 序列末尾 `*`（stop codon）
+
+- 背景：Prodigal/翻译得到的蛋白序列末尾常带 `*`，建议去掉以避免扰动长度统计与模型 token。
+- 变更：
+  - `scripts/clean_faa_strip_stop.py`：新增；默认去掉末尾连续 `*`，并可配置内部 `*` 的处理策略。
+- 用法（示例）：
+  - `python scripts/clean_faa_strip_stop.py --in YOUR.faa --out YOUR.cleaned.faa`

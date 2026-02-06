@@ -20,6 +20,7 @@
   - 数据说明：`data/database_construct_description.md`
 - 工具脚本：
   - 阴性长度匹配采样：`scripts/sample_len_matched_neg.py`
+  - 清理 `.faa` 末尾 `*`：`scripts/clean_faa_strip_stop.py`
 - 评估方法学（论文可复现协议）：`EVAL_PROTOCOL.md`
 - 工作与实验日志（按时间追加）：`WORKLOG.md`
 
