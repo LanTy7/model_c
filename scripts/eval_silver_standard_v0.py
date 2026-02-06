@@ -332,7 +332,10 @@ def main() -> int:
             if "Others" in class_names:
                 ref_class = "Others"
 
+        # multi 的输出 FileName 通常来自二分类输出的文件名："{orig_filename}_pred.fasta"
         m = multi_rows.get((file_name, q), {})
+        if not m:
+            m = multi_rows.get((f"{file_name}_pred.fasta", q), {})
         mp = m.get("PredictedClass", "")
         mprob = m.get("Probability", "")
 
