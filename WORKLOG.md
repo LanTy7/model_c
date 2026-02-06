@@ -115,6 +115,12 @@
   - `scripts/eval_silver_standard_v0.py`：新增 `--mode {full,orf}`，`orf` 模式以 `qcov` 为主并放宽 `scov`。
   - `EVAL_PROTOCOL.md`：新增 `v0-orF` 阈值说明。
 
+## 2026-02-06 修复：`--file-name` 兼容传入完整路径
+
+- 问题：评估脚本的 `--file-name` 用于匹配二分类 scores.csv 的 `FileName` 字段；该字段通常是 basename。若用户传入完整路径，会导致筛选为空（matched_to_binary_ids=0）。
+- 变更：
+  - `scripts/eval_silver_standard_v0.py`：对 `--file-name` 自动取 `basename`，避免路径不一致导致空评估。
+
 ## 2026-02-06 真实评估集构建：预筛选含 ARG 的 `.faa` 文件（随机抽样 N）
 
 - 背景：单个真实 `.faa` 可能在 strict 阈值下没有 ARG，导致只能评估假阳性率，无法评估召回与端到端分类。

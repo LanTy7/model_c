@@ -284,6 +284,9 @@ def macro_f1(y_true: List[str], y_pred: List[str]) -> float:
 
 def main() -> int:
     args = parse_args()
+    # 兼容用户传入完整路径：二分类 scores.csv 的 FileName 通常是 basename
+    if args.file_name:
+        args.file_name = os.path.basename(args.file_name)
     subj2class = build_subject_class_map(args.arg_db)
     class_names = try_load_class_names_from_ckpt(args.multi_ckpt) or []
 
