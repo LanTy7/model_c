@@ -1,39 +1,43 @@
-# Binary Classification Test Configuration
+# Multi-class Classification Test Configuration
 
 model:
-  name: "BinaryARGClassifier"
-  vocab_size: 22
-  embedding_dim: 48
-  hidden_size: 48
-  num_layers: 1
+  name: "MultiClassARGClassifier"
+  input_size: 21
+  hidden_size: 128
+  num_layers: 2
   dropout: 0.5
-  max_length: 1000
 
 training:
   epochs: 5
   batch_size: 256
   lr: 0.001
-  weight_decay: 0.005
+  weight_decay: 0.02
   patience: 10
   grad_clip: 1.0
   warmup_epochs: 2
   use_amp: true
   accumulation_steps: 1
   num_workers: 4
+  use_balanced_sampling: false
+
+# Focal Loss parameters
+focal_loss:
+  gamma: 1.0
+  label_smoothing: 0.05
+  class_weight_method: "sqrt"
+  class_weight_clip: [0.5, 3.0]
 
 data:
-  train_fasta: "data/train.fasta"
-  val_fasta: "data/val.fasta"
-  test_fasta: "data/test.fasta"
   train_csv: "data/train.csv"
   val_csv: "data/val.csv"
   test_csv: "data/test.csv"
-  pos_neg_ratio: 1
+  min_samples: 40
+  max_length_percentile: 95
 
 paths:
-  save_dir: "./checkpoints/binary_test"
-  log_dir: "./logs/binary_test"
-  fig_dir: "./figures/binary_test"
+  save_dir: "./checkpoints/multi_test"
+  log_dir: "./logs/multi_test"
+  fig_dir: "./figures/multi_test"
 
 # Visualization settings
 visualization:

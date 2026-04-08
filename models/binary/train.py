@@ -177,7 +177,9 @@ def main(config_path: str):
         accumulation_steps=config['training']['accumulation_steps'],
         save_dir=config['paths']['save_dir'],
         device=device,
-        num_workers=config['training']['num_workers']
+        num_workers=config['training']['num_workers'],
+        fig_dir=config['paths'].get('fig_dir'),
+        class_names=['non-ARG', 'ARG']
     )
 
     # Define metric function for early stopping (use validation F1)
@@ -203,6 +205,26 @@ def main(config_path: str):
     logger.info("Training completed!")
     logger.info(f"Best model saved to: {trainer.best_model_path}")
     logger.info(f"Best metric: {trainer.best_metric:.4f}")
+
+    # Test set evaluation (if test data exists)
+    if 'test_csv' in config['data'] and os.path.exists(config['data']['test_csv']):
+        logger.info("Loading test data for evaluation...")
+        test_seqs, test_labels = load_data(config['data']['test_csv'], logger)
+        max_length = config['model']['max_length']
+        test_dataset = BinarySequenceDataset(test_seqs, test_labels, max_length)
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=config['training']['batch_size'],
+            shuffle=False,
+            num_workers=config['training']['num_workers'],
+            pin_memory=True
+        )
+
+        test_metrics = trainer.evaluate(test_loader, class_names=['non-ARG', 'ARG'])
+
+        # Log test metrics
+        from utils.metrics import format_metrics_for_display
+        logger.info("\n" + format_metrics_for_display(test_metrics))
 
 
 if __name__ == "__main__":

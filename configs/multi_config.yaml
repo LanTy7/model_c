@@ -5,7 +5,7 @@ model:
   input_size: 21
   hidden_size: 256
   num_layers: 3
-  dropout: 0.5            # 增加: 0.3 -> 0.5 (更强正则化)
+  dropout: 0.5
 
 training:
   epochs: 150
@@ -38,6 +38,22 @@ paths:
   save_dir: "./checkpoints/multi"
   log_dir: "./logs/multi"
   fig_dir: "./figures/multi"
+
+# Visualization settings
+visualization:
+  enabled: true
+  format: "png"
+  plots:
+    - training_curves
+    - confusion_matrix
+    - per_class_metrics
+    - roc_curves
+
+# Evaluation settings
+evaluation:
+  compute_per_class: true
+  save_predictions: true
+  save_history: true
 
 device: "cuda"
 seed: 42

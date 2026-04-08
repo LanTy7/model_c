@@ -1,9 +1,21 @@
-results/
-.claude/
-scripts/
-data/
-checkpoints/
-logs/
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Docs
 README.md
 workflow_orchestration.md
 tasks/
+
+# Model-related
+checkpoints/
+data/
+figures/
+logs/
+results/
+scripts/
+
+# Unrelated files
+.claude/

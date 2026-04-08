@@ -2,7 +2,7 @@
 import os
 import time
 import logging
-from typing import Dict, Optional, Callable, Any
+from typing import Dict, List, Optional, Callable, Any
 from dataclasses import dataclass
 
 import numpy as np
@@ -31,6 +31,8 @@ class TrainConfig:
     save_dir: str = './checkpoints'
     device: str = 'cuda'
     num_workers: int = 4
+    fig_dir: Optional[str] = None  # Directory for saving figures
+    class_names: Optional[List[str]] = None  # Class names for visualization
 
 
 class EarlyStopping:
@@ -129,7 +131,12 @@ class Trainer:
             'val_loss': [],
             'train_metric': [],
             'val_metric': [],
-            'lr': []
+            'lr': [],
+            'val_accuracy': [],
+            'val_precision': [],
+            'val_recall': [],
+            'val_f1': [],
+            'val_auc': []
         }
         self.best_metric = -float('inf') if metric_fn else float('inf')
         self.best_model_path = None
@@ -323,6 +330,11 @@ class Trainer:
             self.history['val_loss'].append(val_loss)
             self.history['val_metric'].append(current_metric)
             self.history['lr'].append(self.optimizer.param_groups[0]['lr'])
+            self.history['val_accuracy'].append(val_metrics.get('accuracy', 0))
+            self.history['val_precision'].append(val_metrics.get('precision', 0))
+            self.history['val_recall'].append(val_metrics.get('recall', 0))
+            self.history['val_f1'].append(val_metrics.get('f1', 0))
+            self.history['val_auc'].append(val_metrics.get('auc', 0))
 
             # Log
             epoch_time = time.time() - start_time
@@ -348,7 +360,113 @@ class Trainer:
                 self.logger.info(f"Early stopping triggered at epoch {epoch+1}")
                 break
 
+        # Save history and generate plots if fig_dir is provided
+        if self.config.fig_dir:
+            self._save_history()
+            self._generate_training_plots()
+
         return self.history
+
+    def _save_history(self) -> None:
+        """Save training history to JSON."""
+        import json
+        history_path = os.path.join(self.config.save_dir, 'training_history.json')
+        with open(history_path, 'w') as f:
+            json.dump(self.history, f, indent=2)
+        self.logger.info(f"Training history saved to: {history_path}")
+
+    def _generate_training_plots(self) -> None:
+        """Generate training visualization plots."""
+        try:
+            from utils.visualization import plot_training_curves, plot_learning_rate_schedule
+            os.makedirs(self.config.fig_dir, exist_ok=True)
+            plot_training_curves(self.history, self.config.fig_dir)
+            plot_learning_rate_schedule(self.history, self.config.fig_dir)
+            self.logger.info(f"Training plots saved to: {self.config.fig_dir}")
+        except Exception as e:
+            self.logger.warning(f"Failed to generate training plots: {e}")
+
+    def evaluate(
+        self,
+        test_loader: DataLoader,
+        class_names: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """
+        Comprehensive evaluation on test set.
+
+        Args:
+            test_loader: Test data loader
+            class_names: List of class names for visualization
+
+        Returns:
+            Dictionary containing all evaluation metrics
+        """
+        from utils.metrics import compute_comprehensive_metrics
+        from utils.visualization import (
+            create_training_report, plot_confusion_matrix,
+            plot_per_class_metrics, plot_roc_curves, save_metrics_json
+        )
+
+        self.logger.info("Running test set evaluation...")
+        self.model.eval()
+
+        all_preds = []
+        all_targets = []
+        all_probs = []
+
+        with torch.no_grad():
+            for inputs, targets in test_loader:
+                inputs = inputs.to(self.config.device)
+                targets = targets.to(self.config.device)
+
+                if self.config.use_amp:
+                    with autocast():
+                        outputs = self.model(inputs)
+                else:
+                    outputs = self.model(inputs)
+
+                # Get predictions and probabilities
+                is_binary = outputs.dim() == 2 and outputs.shape[1] == 1 and targets.dim() == 1
+
+                if is_binary:
+                    probs = torch.sigmoid(outputs).cpu().numpy()
+                    preds = (probs > 0.5).astype(int)
+                else:
+                    probs = torch.softmax(outputs, dim=1).cpu().numpy()
+                    preds = np.argmax(probs, axis=1)
+
+                all_preds.extend(preds.flatten())
+                all_targets.extend(targets.cpu().numpy().flatten())
+                all_probs.append(probs if is_binary else probs)
+
+        y_true = np.array(all_targets)
+        y_pred = np.array(all_preds)
+        y_prob = np.concatenate(all_probs, axis=0)
+
+        # Compute comprehensive metrics
+        class_names = class_names or self.config.class_names
+        metrics = compute_comprehensive_metrics(y_true, y_pred, y_prob, class_names)
+
+        # Generate visualizations
+        if self.config.fig_dir:
+            try:
+                os.makedirs(self.config.fig_dir, exist_ok=True)
+
+                if class_names:
+                    plot_confusion_matrix(y_true, y_pred, class_names, self.config.fig_dir)
+                    plot_per_class_metrics(metrics, class_names, self.config.fig_dir)
+                    plot_roc_curves(y_true, y_prob, class_names, self.config.fig_dir)
+
+                self.logger.info(f"Evaluation plots saved to: {self.config.fig_dir}")
+            except Exception as e:
+                self.logger.warning(f"Failed to generate evaluation plots: {e}")
+
+        # Save metrics
+        metrics_path = os.path.join(self.config.save_dir, 'test_metrics.json')
+        save_metrics_json(metrics, metrics_path)
+        self.logger.info(f"Test metrics saved to: {metrics_path}")
+
+        return metrics
 
     def save_checkpoint(self, path: str, epoch: int, metrics: Dict):
         """Save model checkpoint."""

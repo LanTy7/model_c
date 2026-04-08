@@ -242,7 +242,9 @@ def main(config_path: str):
         accumulation_steps=config['training']['accumulation_steps'],
         save_dir=config['paths']['save_dir'],
         device=device,
-        num_workers=config['training']['num_workers']
+        num_workers=config['training']['num_workers'],
+        fig_dir=config['paths'].get('fig_dir'),
+        class_names=class_names
     )
 
     # Define metric function for early stopping (use validation F1)
@@ -268,6 +270,42 @@ def main(config_path: str):
     logger.info("Training completed!")
     logger.info(f"Best model saved to: {trainer.best_model_path}")
     logger.info(f"Best metric: {trainer.best_metric:.4f}")
+
+    # Test set evaluation (if test data exists)
+    if 'test_csv' in config['data'] and os.path.exists(config['data']['test_csv']):
+        logger.info("Loading test data for evaluation...")
+
+        # Load test data using same preprocessing
+        test_df = pd.read_csv(config['data']['test_csv'])
+        test_df = test_df[test_df['is_arg'] == 1].copy()
+        logger.info(f"Filtered test to {len(test_df)} ARG sequences (is_arg=1)")
+
+        test_seqs = test_df['sequence'].str.upper().tolist()
+        test_labels_str = test_df['arg_category'].fillna('Others').tolist()
+
+        # Map test labels
+        test_labels = []
+        for label in test_labels_str:
+            if label in label_to_idx:
+                test_labels.append(label_to_idx[label])
+            else:
+                test_labels.append(label_to_idx.get('Others', 0))
+        test_labels = np.array(test_labels, dtype=np.int64)
+
+        test_dataset = MultiClassARGDataset(test_seqs, test_labels, max_length)
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=config['training']['batch_size'],
+            shuffle=False,
+            num_workers=config['training']['num_workers'],
+            pin_memory=True
+        )
+
+        test_metrics = trainer.evaluate(test_loader, class_names=class_names)
+
+        # Log test metrics
+        from utils.metrics import format_metrics_for_display
+        logger.info("\n" + format_metrics_for_display(test_metrics))
 
     # Save additional metadata
     import json

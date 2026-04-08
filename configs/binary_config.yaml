@@ -32,5 +32,21 @@ paths:
   log_dir: "./logs/binary"
   fig_dir: "./figures/binary"
 
+# Visualization settings
+visualization:
+  enabled: true
+  format: "png"
+  plots:
+    - training_curves
+    - confusion_matrix
+    - per_class_metrics
+    - roc_curves
+
+# Evaluation settings
+evaluation:
+  compute_per_class: true
+  save_predictions: true
+  save_history: true
+
 device: "cuda"
 seed: 42
