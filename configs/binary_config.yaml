@@ -1,0 +1,36 @@
+# Binary Classification Configuration
+
+model:
+  name: "BinaryARGClassifier"
+  vocab_size: 22
+  embedding_dim: 128
+  hidden_size: 128
+  num_layers: 2
+  dropout: 0.5            # 增加: 0.3 -> 0.5 (更强正则化)
+  max_length: 1000
+
+training:
+  epochs: 100
+  batch_size: 256
+  lr: 0.0003              # 降低学习率
+  weight_decay: 0.02      # 增加正则化
+  patience: 10            # 减少耐心，更快早停
+  grad_clip: 1.0
+  warmup_epochs: 5
+  use_amp: true
+  accumulation_steps: 1
+  num_workers: 4
+
+data:
+  train_csv: "data/train.csv"
+  val_csv: "data/val.csv"
+  test_csv: "data/test.csv"
+  pos_neg_ratio: 1
+
+paths:
+  save_dir: "./checkpoints/binary"
+  log_dir: "./logs/binary"
+  fig_dir: "./figures/binary"
+
+device: "cuda"
+seed: 42

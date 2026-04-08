@@ -1,5 +1,9 @@
 results/
-
 .claude/
-
 scripts/
+data/
+checkpoints/
+logs/
+README.md
+workflow_orchestration.md
+tasks/

@@ -1,0 +1,43 @@
+# Multi-class Classification Configuration
+
+model:
+  name: "MultiClassARGClassifier"
+  input_size: 21
+  hidden_size: 256
+  num_layers: 3
+  dropout: 0.5            # 增加: 0.3 -> 0.5 (更强正则化)
+
+training:
+  epochs: 150
+  batch_size: 256
+  lr: 0.001               # 提高学习率
+  weight_decay: 0.02      # 增强正则化
+  patience: 20
+  grad_clip: 1.0
+  warmup_epochs: 5
+  use_amp: true
+  accumulation_steps: 1
+  num_workers: 4
+  use_balanced_sampling: false  # 关闭激进采样，改用权重
+
+# Focal Loss parameters
+focal_loss:
+  gamma: 1.0              # 恢复: 1.0 (温和关注难分样本)
+  label_smoothing: 0.05   # 减少平滑
+  class_weight_method: "sqrt"    # 恢复sqrt (温和处理不平衡)
+  class_weight_clip: [0.5, 3.0]  # 收紧范围避免极端权重
+
+data:
+  train_csv: "data/train.csv"
+  val_csv: "data/val.csv"
+  test_csv: "data/test.csv"
+  min_samples: 40
+  max_length_percentile: 95
+
+paths:
+  save_dir: "./checkpoints/multi"
+  log_dir: "./logs/multi"
+  fig_dir: "./figures/multi"
+
+device: "cuda"
+seed: 42
