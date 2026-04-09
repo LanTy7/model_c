@@ -12,6 +12,7 @@ tasks/
 # Model-related
 checkpoints/
 data/
+analysis/
 figures/
 logs/
 results/
@@ -19,3 +20,5 @@ scripts/
 
 # Unrelated files
 .claude/
+EOF
+PYEOF
