@@ -109,7 +109,7 @@ class MultiClassARGClassifier(nn.Module):
         self,
         x: torch.Tensor,
         return_attention: bool = False
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Args:
             x: One-hot encoded sequences (batch, seq_len, 21)

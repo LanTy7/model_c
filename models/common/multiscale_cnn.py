@@ -213,7 +213,7 @@ class CNN_BiLSTM_Backbone(nn.Module):
         x: torch.Tensor,
         mask: torch.Tensor = None,
         return_attention: bool = False
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Args:
             x: Input tensor (batch, seq_len, input_size)
