@@ -3,10 +3,107 @@ import torch
 import torch.nn as nn
 
 
+class BiLSTMAttentionBackbone(nn.Module):
+    """
+    BiLSTM backbone with optional self-attention layer.
+
+    This combines BiLSTM encoding with multi-head self-attention,
+    allowing the model to learn which sequence positions are most
+    important for classification.
+
+    Args:
+        input_size: Input feature dimension
+        hidden_size: LSTM hidden size
+        num_layers: Number of LSTM layers
+        dropout: Dropout probability
+        bidirectional: Whether to use bidirectional LSTM
+        use_attention: Whether to add self-attention layer
+        num_attention_heads: Number of attention heads (if use_attention=True)
+        attention_dropout: Dropout for attention weights
+    """
+
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int = 128,
+        num_layers: int = 2,
+        dropout: float = 0.4,
+        bidirectional: bool = True,
+        use_attention: bool = False,
+        num_attention_heads: int = 4,
+        attention_dropout: float = 0.1
+    ):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.bidirectional = bidirectional
+        self.num_directions = 2 if bidirectional else 1
+        self.use_attention = use_attention
+
+        self.lstm = nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True,
+            bidirectional=bidirectional,
+            dropout=dropout if num_layers > 1 else 0
+        )
+
+        self.output_size = hidden_size * self.num_directions
+
+        # Optional self-attention layer
+        if use_attention:
+            from .attention import SelfAttention
+            self.attention = SelfAttention(
+                hidden_dim=self.output_size,
+                num_heads=num_attention_heads,
+                dropout=attention_dropout
+            )
+        else:
+            self.attention = None
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        mask: torch.Tensor = None,
+        return_attention: bool = False
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        """
+        Args:
+            x: Input tensor (batch, seq_len, input_size)
+            mask: Optional mask tensor (batch, seq_len), True for valid positions
+            return_attention: Whether to return attention weights (only if use_attention=True)
+
+        Returns:
+            If return_attention=False: LSTM output (batch, seq_len, hidden_size * num_directions)
+            If return_attention=True and use_attention=True: (output, attention_weights)
+        """
+        # BiLSTM encoding
+        output, _ = self.lstm(x)
+
+        # Apply mask if provided (for variable length sequences)
+        if mask is not None:
+            # Expand mask for feature dimension
+            mask_expanded = mask.unsqueeze(-1)  # (batch, seq_len, 1)
+            output = output.masked_fill(~mask_expanded, 0.0)
+
+        # Apply self-attention if enabled
+        attention_weights = None
+        if self.use_attention and self.attention is not None:
+            output, attention_weights = self.attention(output, mask)
+
+        if return_attention and attention_weights is not None:
+            return output, attention_weights
+
+        return output
+
+
 class BiLSTMBackbone(nn.Module):
     """
     Shared BiLSTM backbone for sequence encoding.
     Can be used with either embedding or one-hot input.
+
+    Note: This is now a wrapper around BiLSTMAttentionBackbone for backward compatibility.
     """
 
     def __init__(
@@ -26,21 +123,15 @@ class BiLSTMBackbone(nn.Module):
             bidirectional: Whether to use bidirectional LSTM
         """
         super().__init__()
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
-        self.bidirectional = bidirectional
-        self.num_directions = 2 if bidirectional else 1
-
-        self.lstm = nn.LSTM(
+        self.backbone = BiLSTMAttentionBackbone(
             input_size=input_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
-            batch_first=True,
+            dropout=dropout,
             bidirectional=bidirectional,
-            dropout=dropout if num_layers > 1 else 0
+            use_attention=False
         )
-
-        self.output_size = hidden_size * self.num_directions
+        self.output_size = self.backbone.output_size
 
     def forward(self, x: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
         """
@@ -51,15 +142,7 @@ class BiLSTMBackbone(nn.Module):
         Returns:
             LSTM output (batch, seq_len, hidden_size * num_directions)
         """
-        output, _ = self.lstm(x)
-
-        # Apply mask if provided (for variable length sequences)
-        if mask is not None:
-            # Expand mask for feature dimension
-            mask = mask.unsqueeze(-1)  # (batch, seq_len, 1)
-            output = output.masked_fill(~mask, 0.0)
-
-        return output
+        return self.backbone(x, mask, return_attention=False)
 
 
 class GlobalPooling(nn.Module):

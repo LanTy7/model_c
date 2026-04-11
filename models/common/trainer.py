@@ -33,6 +33,12 @@ class TrainConfig:
     num_workers: int = 4
     fig_dir: Optional[str] = None  # Directory for saving figures
     class_names: Optional[List[str]] = None  # Class names for visualization
+    # AECR loss configuration
+    use_aecr: bool = False  # Whether to use AECR attention regularization
+    lambda_aecr: float = 0.1  # Weight for AECR loss
+    aecr_sigma: float = 3.0  # Gaussian kernel sigma for AECR
+    aecr_lambda_ent: float = 1.0  # Entropy loss weight
+    aecr_lambda_loc: float = 0.5  # Local continuity loss weight
 
 
 class EarlyStopping:
@@ -143,12 +149,34 @@ class Trainer:
 
         os.makedirs(config.save_dir, exist_ok=True)
 
+        # AECR loss for attention regularization
+        self.aecr_criterion = None
+        if config.use_aecr:
+            try:
+                from .aecr_loss import AECRLoss
+                self.aecr_criterion = AECRLoss(
+                    sigma=config.aecr_sigma,
+                    lambda_ent=config.aecr_lambda_ent,
+                    lambda_loc=config.aecr_lambda_loc
+                )
+                self.logger.info(
+                    f"AECR loss enabled (lambda={config.lambda_aecr}, "
+                    f"sigma={config.aecr_sigma})"
+                )
+            except ImportError:
+                self.logger.warning("AECR loss not available. Install required.")
+
     def _train_epoch(self, train_loader: DataLoader) -> tuple:
         """Train for one epoch."""
         self.model.train()
         self.optimizer.zero_grad()  # Clear gradients at start
         total_loss = 0.0
+        total_task_loss = 0.0
+        total_aecr_loss = 0.0
         num_batches = 0
+
+        # Check if model uses attention
+        model_uses_attention = getattr(self.model, 'use_attention', False)
 
         for batch_idx, (inputs, targets) in enumerate(train_loader):
             inputs = inputs.to(self.config.device)
@@ -157,18 +185,52 @@ class Trainer:
             # Mixed precision forward pass
             if self.config.use_amp:
                 with autocast():
-                    outputs = self.model(inputs)
+                    # Forward pass (with attention if model supports it)
+                    if model_uses_attention:
+                        outputs, attention_weights = self.model(inputs, return_attention=True)
+                    else:
+                        outputs = self.model(inputs)
+                        attention_weights = None
+
                     # Handle shape mismatch for binary classification
                     if outputs.dim() == 2 and outputs.shape[1] == 1 and targets.dim() == 1:
                         outputs = outputs.squeeze(1)
-                    loss = self.criterion(outputs, targets)
+
+                    # Task loss
+                    task_loss = self.criterion(outputs, targets)
+
+                    # AECR loss (if enabled and attention weights available)
+                    aecr_loss = 0.0
+                    if self.aecr_criterion is not None and attention_weights is not None:
+                        aecr_loss = self.aecr_criterion(attention_weights)
+                        aecr_loss = aecr_loss * self.config.lambda_aecr
+
+                    # Total loss
+                    loss = task_loss + aecr_loss
                     loss = loss / self.config.accumulation_steps
             else:
-                outputs = self.model(inputs)
+                # Forward pass (with attention if model supports it)
+                if model_uses_attention:
+                    outputs, attention_weights = self.model(inputs, return_attention=True)
+                else:
+                    outputs = self.model(inputs)
+                    attention_weights = None
+
                 # Handle shape mismatch for binary classification
                 if outputs.dim() == 2 and outputs.shape[1] == 1 and targets.dim() == 1:
                     outputs = outputs.squeeze(1)
-                loss = self.criterion(outputs, targets)
+
+                # Task loss
+                task_loss = self.criterion(outputs, targets)
+
+                # AECR loss (if enabled and attention weights available)
+                aecr_loss = 0.0
+                if self.aecr_criterion is not None and attention_weights is not None:
+                    aecr_loss = self.aecr_criterion(attention_weights)
+                    aecr_loss = aecr_loss * self.config.lambda_aecr
+
+                # Total loss
+                loss = task_loss + aecr_loss
                 loss = loss / self.config.accumulation_steps
 
             # Backward pass
@@ -199,9 +261,22 @@ class Trainer:
                     self.scheduler.step()
 
             total_loss += loss.item() * self.config.accumulation_steps
+            total_task_loss += task_loss.item()
+            if isinstance(aecr_loss, torch.Tensor):
+                total_aecr_loss += aecr_loss.item()
             num_batches += 1
 
         avg_loss = total_loss / num_batches
+
+        # Log loss components if AECR is used
+        if self.aecr_criterion is not None:
+            avg_task_loss = total_task_loss / num_batches
+            avg_aecr_loss = total_aecr_loss / num_batches
+            self.logger.debug(
+                f"  Train Loss: {avg_loss:.4f} "
+                f"(Task: {avg_task_loss:.4f}, AECR: {avg_aecr_loss:.4f})"
+            )
+
         return avg_loss
 
     def _validate(self, val_loader: DataLoader) -> tuple:
