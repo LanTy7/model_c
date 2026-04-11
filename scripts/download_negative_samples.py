@@ -309,7 +309,7 @@ def filter_negative_samples(
     logger.info(f"  Too long (>{max_length}): {stats['too_long']}")
     logger.info(f"  Retained: {stats['retained']}")
 
-    return filtered
+    return filtered, stats
 
 
 def save_to_fasta(sequences: List[Dict], filepath: str):
@@ -384,7 +384,7 @@ def main(
         except ImportError:
             logger.warning("  - taxoniq not available, falling back to keyword-based filtering")
             use_taxoniq = False
-    filtered = filter_negative_samples(all_sequences, filter_prokaryote=filter_prokaryote, use_taxoniq=use_taxoniq)
+    filtered, filter_stats = filter_negative_samples(all_sequences, filter_prokaryote=filter_prokaryote, use_taxoniq=use_taxoniq)
 
     # Sample or keep all filtered sequences
     if target_count is None:
@@ -431,10 +431,10 @@ def main(
         'total_downloaded': len(all_sequences),
         'filter_prokaryote': filter_prokaryote,
         'use_taxoniq': use_taxoniq,
-        'resistance_related_excluded': stats['resistance_related'],
-        'not_prokaryote_excluded': stats['not_prokaryote'],
-        'too_short_excluded': stats['too_short'],
-        'too_long_excluded': stats['too_long'],
+        'resistance_related_excluded': filter_stats['resistance_related'],
+        'not_prokaryote_excluded': filter_stats['not_prokaryote'],
+        'too_short_excluded': filter_stats['too_short'],
+        'too_long_excluded': filter_stats['too_long'],
         'retained_before_sampling': len(filtered),
         'final_count': len(selected),
         'length_stats': {
