@@ -345,7 +345,7 @@ def save_to_csv(sequences: List[Dict], filepath: str):
 
 def main(
     output_dir: str = './data_now',
-    target_count: int = 20000,  # Sample more to ensure enough after filtering
+    target_count: int = None,  # Number of negative samples to select, None = keep all filtered
     seed: int = 42,
     filter_prokaryote: bool = True,
     use_taxoniq: bool = True
@@ -355,7 +355,7 @@ def main(
 
     Args:
         output_dir: Output directory
-        target_count: Number of negative samples to select
+        target_count: Number of negative samples to select, None = keep all filtered sequences
         seed: Random seed for sampling
         filter_prokaryote: If True, only keep prokaryotic sequences (Bacteria/Archaea)
         use_taxoniq: If True, use taxoniq with NCBI Taxonomy for accurate classification
@@ -386,7 +386,11 @@ def main(
             use_taxoniq = False
     filtered = filter_negative_samples(all_sequences, filter_prokaryote=filter_prokaryote, use_taxoniq=use_taxoniq)
 
-    if len(filtered) < target_count:
+    # Sample or keep all filtered sequences
+    if target_count is None:
+        selected = filtered
+        logger.info(f"\nKept all {len(selected)} filtered negative samples (target_count=None)")
+    elif len(filtered) < target_count:
         logger.warning(f"Only {len(filtered)} negative samples available, requested {target_count}")
         selected = filtered
     else:
@@ -454,7 +458,7 @@ def main(
 if __name__ == "__main__":
     main(
         output_dir='./data_now',
-        target_count=20000,  # Sample more to ensure enough after filtering
+        target_count=None,  # Keep all filtered sequences
         seed=42,
         filter_prokaryote=True,
         use_taxoniq=True

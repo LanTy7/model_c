@@ -178,15 +178,21 @@ def save_csv(sequences: List[Dict], filepath: str):
 
 
 def main(
-    negative_fasta: str = './data/negative_samples.fasta',
-    arg_fasta: str = './data/qc_retained.fasta',
-    uniprot_gz: str = './data/uniprot_sprot.fasta.gz',
-    output_dir: str = './data',
-    target_count: int = 17242,
+    negative_fasta: str = './data_now/negative_samples.fasta',
+    arg_fasta: str = './data_now/qc_retained.fasta',
+    output_dir: str = './data_now',
+    target_count: int = None,  # Number to sample, None = keep all qualified
     seed: int = 42
 ):
     """
     Refine negative samples using MCT-ARG methodology.
+
+    Args:
+        negative_fasta: Path to candidate negative samples
+        arg_fasta: Path to ARG database for screening
+        output_dir: Output directory
+        target_count: Number to sample, None = keep all qualified sequences
+        seed: Random seed
     """
     random.seed(seed)
 
@@ -229,8 +235,12 @@ def main(
     if os.path.exists(cdhit_output):
         os.remove(cdhit_output)
 
-    # Step 6: Random sampling to target count
-    if len(dedup_negatives) < target_count:
+    # Step 6: Random sampling or keep all
+    if target_count is None:
+        # Keep all qualified sequences
+        final_negatives = dedup_negatives
+        logger.info(f"\nStep 4: Keeping all {len(final_negatives)} qualified sequences (no sampling)")
+    elif len(dedup_negatives) < target_count:
         logger.warning(f"Only {len(dedup_negatives)} negative samples available (target: {target_count})")
         final_negatives = dedup_negatives
     else:
@@ -289,9 +299,9 @@ def main(
 
 if __name__ == "__main__":
     main(
-        negative_fasta='./data/negative_samples.fasta',
-        arg_fasta='./data/qc_retained.fasta',
-        output_dir='./data',
-        target_count=17242,
+        negative_fasta='./data_now/negative_samples.fasta',
+        arg_fasta='./data_now/qc_retained.fasta',
+        output_dir='./data_now',
+        target_count=None,  # Keep all qualified sequences
         seed=42
     )
