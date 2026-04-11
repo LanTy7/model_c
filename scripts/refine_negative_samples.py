@@ -181,17 +181,19 @@ def main(
     negative_fasta: str = './data_now/negative_samples.fasta',
     arg_fasta: str = './data_now/qc_retained.fasta',
     output_dir: str = './data_now',
-    target_count: int = None,  # Number to sample, None = keep all qualified
+    input_sample_size: int = None,  # Sample from input, None = use all
+    target_count: int = None,  # Final output count, None = keep all qualified
     seed: int = 42
 ):
     """
     Refine negative samples using MCT-ARG methodology.
 
     Args:
-        negative_fasta: Path to candidate negative samples
+        negative_fasta: Path to candidate negative samples (can be large pool)
         arg_fasta: Path to ARG database for screening
         output_dir: Output directory
-        target_count: Number to sample, None = keep all qualified sequences
+        input_sample_size: Number to sample from input, None = use all input
+        target_count: Final output count, None = keep all qualified sequences
         seed: Random seed
     """
     random.seed(seed)
@@ -204,6 +206,15 @@ def main(
     logger.info(f"\nStep 1: Loading negative samples from {negative_fasta}")
     all_negatives = parse_fasta(negative_fasta)
     logger.info(f"Loaded {len(all_negatives)} candidate negative samples")
+
+    # Optional: Sample from large pool for processing
+    if input_sample_size is not None and len(all_negatives) > input_sample_size:
+        logger.info(f"\n  Sampling {input_sample_size} sequences from {len(all_negatives)} for processing")
+        all_negatives = random.sample(all_negatives, input_sample_size)
+        # Save sampled sequences to temp file for DIAMOND processing
+        temp_sampled = os.path.join(output_dir, 'temp_input_sampled.fasta')
+        save_fasta(all_negatives, temp_sampled)
+        negative_fasta = temp_sampled  # Use sampled file for DIAMOND
 
     # Step 2: DIAMOND screening against ARG database
     logger.info(f"\nStep 2: DIAMOND screening against ARG database ({arg_fasta})")
@@ -234,6 +245,9 @@ def main(
         os.remove(temp_fasta)
     if os.path.exists(cdhit_output):
         os.remove(cdhit_output)
+    # Clean up input sample file if created
+    if input_sample_size is not None and os.path.exists(negative_fasta) and 'temp_input_sampled' in negative_fasta:
+        os.remove(negative_fasta)
 
     # Step 6: Random sampling or keep all
     if target_count is None:
@@ -263,6 +277,7 @@ def main(
     # Statistics
     lengths = [len(s['sequence']) for s in final_negatives]
     stats = {
+        'input_sample_size': input_sample_size,
         'original_candidates': len(all_negatives),
         'diamond_excluded': len(excluded_ids),
         'cdhit_clusters': len(dedup_negatives),
@@ -302,6 +317,7 @@ if __name__ == "__main__":
         negative_fasta='./data_now/negative_samples.fasta',
         arg_fasta='./data_now/qc_retained.fasta',
         output_dir='./data_now',
+        input_sample_size=70000,  # Sample 70k from large pool for processing
         target_count=None,  # Keep all qualified sequences
         seed=42
     )
