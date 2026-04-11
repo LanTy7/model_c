@@ -3,6 +3,7 @@
 import os
 import sys
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +16,38 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from models.binary.model import BinaryARGClassifier
 from utils.sequence_utils import sequence_to_indices
+
+
+def load_threshold_from_file(checkpoint_dir: str) -> tuple:
+    """Load threshold from threshold.json if it exists.
+
+    Args:
+        checkpoint_dir: Directory containing the checkpoint
+
+    Returns:
+        Tuple of (threshold_value, source_description) or (None, None) if not found
+    """
+    threshold_path = os.path.join(checkpoint_dir, 'threshold.json')
+
+    if not os.path.exists(threshold_path):
+        return None, None
+
+    try:
+        with open(threshold_path, 'r') as f:
+            data = json.load(f)
+
+        threshold = data.get('optimal_threshold')
+        tune_metric = data.get('tune_metric', 'unknown')
+        description = data.get('description', '')
+
+        if threshold is not None:
+            source = f"threshold.json (metric: {tune_metric})"
+            return float(threshold), source
+
+        return None, None
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"Warning: Failed to load threshold.json: {e}")
+        return None, None
 
 
 def load_model(checkpoint_path: str, device: str = 'cuda'):
@@ -30,10 +63,21 @@ def load_model(checkpoint_path: str, device: str = 'cuda'):
         state_dict = checkpoint['model_state_dict']
         # embedding.weight shape: (vocab_size, embedding_dim)
         vocab_size, embedding_dim = state_dict['embedding.weight'].shape
-        # backbone.lstm.weight_ih_l0 shape: (hidden*4, embedding_dim)
-        hidden_size = state_dict['backbone.lstm.weight_ih_l0'].shape[0] // 4
-        # Count number of layers by checking for weight_ih_l{layer}
-        num_layers = sum(1 for k in state_dict.keys() if 'weight_ih_l' in k and '_reverse' not in k)
+
+        # Check if enhanced architecture (CNN + Attention)
+        use_cnn = any('cnn.convs' in k for k in state_dict.keys())
+        use_attention = any('backbone.attention' in k for k in state_dict.keys())
+
+        if use_cnn:
+            # Enhanced model with CNN backbone
+            # backbone.bilstm.backbone.lstm... or backbone.backbone.lstm...
+            lstm_key = [k for k in state_dict.keys() if 'lstm.weight_ih_l0' in k and '_reverse' not in k][0]
+            hidden_size = state_dict[lstm_key].shape[0] // 4
+            num_layers = sum(1 for k in state_dict.keys() if 'lstm.weight_ih_l' in k and '_reverse' not in k)
+        else:
+            # Standard model
+            hidden_size = state_dict['backbone.lstm.weight_ih_l0'].shape[0] // 4
+            num_layers = sum(1 for k in state_dict.keys() if 'weight_ih_l' in k and '_reverse' not in k)
 
         model_config = {
             'vocab_size': vocab_size,
@@ -41,7 +85,12 @@ def load_model(checkpoint_path: str, device: str = 'cuda'):
             'hidden_size': hidden_size,
             'num_layers': num_layers,
             'dropout': 0.3,
-            'max_length': 1000
+            'max_length': 1000,
+            'use_cnn': use_cnn,
+            'use_attention': use_attention,
+            'cnn_kernel_sizes': [3, 5, 7] if use_cnn else None,
+            'cnn_out_channels': 64 if use_cnn else None,
+            'num_attention_heads': 4 if use_attention else None,
         }
 
     model = BinaryARGClassifier(**model_config)
@@ -82,14 +131,38 @@ def main():
     parser.add_argument('--output', '-o', required=True, help='Output CSV path')
     parser.add_argument('--device', '-d', default='cuda', help='Device (cuda/cpu)')
     parser.add_argument('--batch-size', '-b', type=int, default=256, help='Batch size')
-    parser.add_argument('--threshold', '-t', type=float, default=0.5, help='Classification threshold')
+    parser.add_argument('--threshold', '-t', type=float, default=None,
+                        help='Classification threshold (overrides threshold.json if provided)')
 
     args = parser.parse_args()
+
+    # Determine threshold to use
+    # Priority: 1) User-provided --threshold, 2) threshold.json, 3) default 0.5
+    default_threshold = 0.5
+
+    if args.threshold is not None:
+        # User provided explicit threshold
+        threshold = args.threshold
+        threshold_source = "command-line argument"
+    else:
+        # Try to load from threshold.json
+        checkpoint_dir = os.path.dirname(os.path.abspath(args.model))
+        loaded_threshold, json_source = load_threshold_from_file(checkpoint_dir)
+
+        if loaded_threshold is not None:
+            threshold = loaded_threshold
+            threshold_source = json_source
+        else:
+            threshold = default_threshold
+            threshold_source = f"default value ({default_threshold})"
 
     # Load model
     print(f"Loading model from {args.model}...")
     model, config = load_model(args.model, args.device)
     max_length = config.get('max_length', 1000)
+
+    # Log threshold being used
+    print(f"Using classification threshold: {threshold:.4f} (from {threshold_source})")
 
     # Load sequences
     print(f"Loading sequences from {args.input}...")
@@ -101,7 +174,7 @@ def main():
 
     print(f"Predicting on {len(sequences)} sequences...")
     probs = predict_sequences(model, sequences, max_length, args.device, args.batch_size)
-    preds = (probs > args.threshold).astype(int)
+    preds = (probs > threshold).astype(int)
 
     # Save results
     results_df = pd.DataFrame({

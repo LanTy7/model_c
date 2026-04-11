@@ -2,6 +2,7 @@
 """Evaluation script for binary ARG classification."""
 import os
 import sys
+import json
 import logging
 import argparse
 from pathlib import Path
@@ -39,6 +40,35 @@ def setup_logging(log_dir: str, log_file: str = "evaluate.log"):
         ]
     )
     return logging.getLogger(__name__)
+
+
+def save_threshold_json(
+    output_path: str,
+    optimal_threshold: float,
+    tune_metric: str,
+    description: str = ""
+) -> str:
+    """Save optimal threshold to threshold.json file.
+
+    Args:
+        output_path: Path to save the threshold.json file
+        optimal_threshold: The optimal threshold value
+        tune_metric: The metric used to optimize the threshold
+        description: Optional description of the threshold
+
+    Returns:
+        Path to the saved file
+    """
+    data = {
+        "optimal_threshold": float(optimal_threshold),
+        "tune_metric": tune_metric,
+        "description": description or f"Threshold optimized for {tune_metric.upper()} score"
+    }
+
+    with open(output_path, 'w') as f:
+        json.dump(data, f, indent=2)
+
+    return output_path
 
 
 def load_config(config_path: str) -> dict:
@@ -303,6 +333,17 @@ def main():
 
     # Save results
     os.makedirs(args.output_dir, exist_ok=True)
+
+    # Save threshold to checkpoint directory for later use by predict.py
+    checkpoint_dir = os.path.dirname(os.path.abspath(args.checkpoint))
+    threshold_path = os.path.join(checkpoint_dir, 'threshold.json')
+    save_threshold_json(
+        threshold_path,
+        optimal_threshold=eval_threshold,
+        tune_metric=args.tune_metric if args.tune_threshold else "manual",
+        description=f"Threshold {'optimized for ' + args.tune_metric.upper() + ' score' if args.tune_threshold else 'set manually'} on test set"
+    )
+    logger.info(f"Threshold saved to: {threshold_path}")
 
     # Save metrics as JSON
     metrics_path = os.path.join(args.output_dir, 'test_metrics.json')
