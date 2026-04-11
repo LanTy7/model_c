@@ -101,53 +101,94 @@ def extract_organism(header: str) -> str:
     return 'unknown'
 
 
-def is_prokaryote(header: str) -> bool:
+def is_prokaryote(header: str, use_taxoniq: bool = True) -> bool:
     """
     Check if organism is a prokaryote (Bacteria or Archaea).
-    Uses multiple strategies:
-    1. Check for Bacteria/Archaea in taxonomy
-    2. Check for eukaryotic keywords to exclude
+
+    Priority:
+    1. Use taxoniq with NCBI Taxonomy (most accurate, requires taxoniq package)
+    2. Fallback to keyword-based filtering if taxoniq fails
+
+    When in doubt, EXCLUDE (return False) - safer to lose some sequences
+    than include eukaryotes.
     """
     header_lower = header.lower()
 
-    # Strategy 1: Direct taxonomy keywords in header
-    if 'ox=' in header_lower:
-        # Extract taxonomy info if available
-        # Some headers have taxonomy in brackets or OX field
-        if 'bacteria' in header_lower or 'archaea' in header_lower:
-            return True
+    # Strategy 1: Use taxoniq if available (most accurate)
+    if use_taxoniq:
+        try:
+            import taxoniq
+            taxid = extract_taxid(header)
+            if taxid:
+                t = taxoniq.Taxon(taxid)
+                for parent in t.ranked_lineage:
+                    if parent.scientific_name == "Bacteria" or parent.scientific_name == "Archaea":
+                        return True
+                # Found in taxonomy but not Bacteria/Archaea
+                return False
+        except ImportError:
+            # taxoniq not available, fall back to keywords
+            pass
+        except Exception:
+            # taxoniq failed for this taxid, fall back to keywords
+            pass
 
-    # Strategy 2: Check organism name
+    # Strategy 2: Keyword-based fallback (less accurate but doesn't require taxoniq)
     organism = extract_organism(header).lower()
 
-    # If organism contains eukaryotic keywords, it's NOT a prokaryote
-    for euk_keyword in EUKARYOTE_KEYWORDS:
-        if euk_keyword in organism or euk_keyword in header_lower:
+    # Check for eukaryotic keywords - exclude if found
+    eukaryote_indicators = {
+        'homo sapiens', 'human', 'mus musculus', 'mouse', 'rattus norvegicus', 'rat',
+        'bos taurus', 'bovine', 'cattle', 'sus scrofa', 'pig', 'canis lupus', 'dog',
+        'felis catus', 'cat', 'oryctolagus cuniculus', 'rabbit',
+        'pan troglodytes', 'chimpanzee', 'gorilla gorilla', 'gorilla', 'pongo abelii', 'orangutan',
+        'macaca mulatta', 'macaque', 'chlorocebus sabaeus', 'vervet',
+        'gallus gallus', 'chicken', 'meleagris gallopavo', 'turkey',
+        'danio rerio', 'zebrafish', 'xenopus laevis', 'xenopus tropicalis', 'xenopus',
+        'drosophila melanogaster', 'drosophila', 'anopheles gambiae', 'mosquito',
+        'caenorhabditis elegans', 'c. elegans',
+        'arabidopsis thaliana', 'arabidopsis', 'oryza sativa', 'rice',
+        'zea mays', 'maize', 'glycine max', 'soybean', 'solanum lycopersicum', 'tomato',
+        'saccharomyces cerevisiae', 's. cerevisiae', 'brewer yeast', 'baker yeast',
+        'schizosaccharomyces pombe', 's. pombe', 'fission yeast',
+        'candida albicans', 'candida', 'aspergillus nidulans', 'aspergillus',
+        'neurospora crassa', 'neurospora', 'dictyostelium discoideum', 'dictyostelium',
+    }
+
+    for indicator in eukaryote_indicators:
+        if indicator in organism or indicator in header_lower:
             return False
 
-    # Strategy 3: Common prokaryotic genus names
+    # Check for known prokaryotic genus names
     prokaryotic_genera = {
         'escherichia', 'salmonella', 'shigella', 'yersinia', 'klebsiella',
-        'pseudomonas', 'bacillus', 'staphylococcus', 'streptococcus',
-        'lactobacillus', 'listeria', 'mycobacterium', 'corynebacterium',
+        'pseudomonas', 'acinetobacter', 'burkholderia',
+        'bacillus', 'staphylococcus', 'streptococcus', 'enterococcus',
+        'lactobacillus', 'corynebacterium', 'mycobacterium', 'streptomyces',
         'clostridium', 'bacteroides', 'helicobacter', 'campylobacter',
         'vibrio', 'neisseria', 'haemophilus', 'borrelia', 'treponema',
-        'chlamydia', 'mycoplasma', 'ureaplasma', 'thermus', 'deinococcus',
-        'rhizobium', 'agrobacterium', 'bradyrhizobium', 'sinorhizobium',
+        'chlamydia', 'mycoplasma', 'thermus', 'rhizobium', 'agrobacterium',
         'azotobacter', 'cyanobacterium', 'synechocystis', 'nostoc',
-        'anabaena', 'thermococcus', 'methanococcus', 'methanobacterium',
+        'thermococcus', 'methanococcus', 'methanobacterium',
         'sulfolobus', 'archaeoglobus', 'halobacterium', 'haloferax',
-        'pyrococcus', 'aeropyrum', 'methanosarcina', 'methanobrevibacter'
     }
 
     for genus in prokaryotic_genera:
         if genus in organism:
             return True
 
-    # Default: if we can't determine, check if it looks like bacteria
-    # Most bacteria have simple genus names not matching eukaryotes
-    # When in doubt, include it (conservative approach)
-    return True
+    # Default: EXCLUDE if we can't confirm it's a prokaryote
+    return False
+
+
+def extract_taxid(header: str) -> int:
+    """Extract NCBI Taxonomy ID from OX= field in UniProt header"""
+    if 'OX=' in header:
+        try:
+            return int(header.split('OX=')[1].split()[0])
+        except (ValueError, IndexError):
+            pass
+    return None
 
 
 def parse_fasta_gz(filepath: str, max_sequences: int = None) -> List[Dict]:
@@ -197,7 +238,8 @@ def filter_negative_samples(
     sequences: List[Dict],
     min_length: int = 50,
     max_length: int = 5000,
-    filter_prokaryote: bool = True
+    filter_prokaryote: bool = True,
+    use_taxoniq: bool = True
 ) -> List[Dict]:
     """
     Filter sequences to exclude resistance-related proteins,
@@ -208,6 +250,7 @@ def filter_negative_samples(
         min_length: Minimum sequence length
         max_length: Maximum sequence length
         filter_prokaryote: If True, only keep prokaryotic sequences
+        use_taxoniq: If True, use taxoniq with NCBI Taxonomy (more accurate)
     """
     filtered = []
     stats = {
@@ -231,7 +274,7 @@ def filter_negative_samples(
             continue
 
         # Check if prokaryote
-        if filter_prokaryote and not is_prokaryote(header):
+        if filter_prokaryote and not is_prokaryote(header, use_taxoniq=use_taxoniq):
             stats['not_prokaryote'] += 1
             continue
 
@@ -304,7 +347,8 @@ def main(
     output_dir: str = './data_now',
     target_count: int = 20000,  # Sample more to ensure enough after filtering
     seed: int = 42,
-    filter_prokaryote: bool = True
+    filter_prokaryote: bool = True,
+    use_taxoniq: bool = True
 ):
     """
     Download and prepare negative samples.
@@ -314,6 +358,7 @@ def main(
         target_count: Number of negative samples to select
         seed: Random seed for sampling
         filter_prokaryote: If True, only keep prokaryotic sequences (Bacteria/Archaea)
+        use_taxoniq: If True, use taxoniq with NCBI Taxonomy for accurate classification
     """
     import random
     import json
@@ -332,7 +377,14 @@ def main(
     logger.info("\nFiltering negative samples...")
     logger.info(f"  - Excluding resistance-related proteins")
     logger.info(f"  - {'Only keeping prokaryotic sequences (Bacteria/Archaea)' if filter_prokaryote else 'Keeping all organisms'}")
-    filtered = filter_negative_samples(all_sequences, filter_prokaryote=filter_prokaryote)
+    if use_taxoniq:
+        try:
+            import taxoniq
+            logger.info("  - Using taxoniq with NCBI Taxonomy for accurate classification")
+        except ImportError:
+            logger.warning("  - taxoniq not available, falling back to keyword-based filtering")
+            use_taxoniq = False
+    filtered = filter_negative_samples(all_sequences, filter_prokaryote=filter_prokaryote, use_taxoniq=use_taxoniq)
 
     if len(filtered) < target_count:
         logger.warning(f"Only {len(filtered)} negative samples available, requested {target_count}")
@@ -374,7 +426,12 @@ def main(
         'source': 'UniProt Swiss-Prot',
         'total_downloaded': len(all_sequences),
         'filter_prokaryote': filter_prokaryote,
-        'resistance_related_excluded': len(all_sequences) - len(filtered) - (len(filtered) - len([s for s in filtered if s['length'] >= 50 and s['length'] <= 5000])),
+        'use_taxoniq': use_taxoniq,
+        'resistance_related_excluded': stats['resistance_related'],
+        'not_prokaryote_excluded': stats['not_prokaryote'],
+        'too_short_excluded': stats['too_short'],
+        'too_long_excluded': stats['too_long'],
+        'retained_before_sampling': len(filtered),
         'final_count': len(selected),
         'length_stats': {
             'mean': sum(lengths) / len(lengths),
@@ -399,5 +456,6 @@ if __name__ == "__main__":
         output_dir='./data_now',
         target_count=20000,  # Sample more to ensure enough after filtering
         seed=42,
-        filter_prokaryote=True
+        filter_prokaryote=True,
+        use_taxoniq=True
     )
