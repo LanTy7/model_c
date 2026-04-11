@@ -43,4 +43,13 @@ training:
 data:
   train_csv: 'data_now/train.csv'
   val_csv: 'data_now/val.csv'
+  test_csv: 'data_now/test.csv'
   max_length: 1000
+
+paths:
+  save_dir: "./checkpoints/binary"
+  log_dir: "./logs/binary"
+  fig_dir: "./figures/binary"
+
+device: "cuda"
+seed: 42

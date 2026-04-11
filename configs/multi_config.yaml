@@ -28,9 +28,9 @@ focal_loss:
   class_weight_clip: [0.5, 3.0]  # 收紧范围避免极端权重
 
 data:
-  train_csv: "data/train.csv"
-  val_csv: "data/val.csv"
-  test_csv: "data/test.csv"
+  train_csv: "data_now/train.csv"
+  val_csv: "data_now/val.csv"
+  test_csv: "data_now/test.csv"
   min_samples: 40
   max_length_percentile: 95
 

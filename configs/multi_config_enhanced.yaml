@@ -39,4 +39,15 @@ focal_loss:
   label_smoothing: 0.1
 
 data:
+  train_csv: 'data_now/train.csv'
+  val_csv: 'data_now/val.csv'
+  test_csv: 'data_now/test.csv'
   min_samples: 40              # Merge rare categories
+
+paths:
+  save_dir: "./checkpoints/multi"
+  log_dir: "./logs/multi"
+  fig_dir: "./figures/multi"
+
+device: "cuda"
+seed: 42

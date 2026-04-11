@@ -8,6 +8,80 @@
 
 ## Completed Tasks
 
+### Phase: Architecture Enhancements (MCT-ARG Inspired) ✅ COMPLETED (2025-04)
+
+#### 1. Self-Attention Mechanism ✅
+- [x] Create `models/common/attention.py` with multi-head SelfAttention module
+- [x] Integrate into BiLSTM backbone (`models/common/bilstm.py`)
+- [x] Add `use_attention` and `num_attention_heads` config options
+- [x] Update binary and multi-class models to support attention
+
+#### 2. Multi-scale CNN ✅
+- [x] Create `models/common/multiscale_cnn.py` with parallel convolutions
+- [x] Support kernel sizes [3, 5, 7] for multi-scale feature extraction
+- [x] Add `use_cnn` and CNN config options to models
+- [x] Integrate CNN output with BiLSTM features
+
+#### 3. AECR Regularization ✅
+- [x] Create `models/common/aecr_loss.py` with AECRLoss class
+- [x] Implement entropy regularization (sharper attention)
+- [x] Implement local continuity (Gaussian kernel-based smoothness)
+- [x] Integrate into Trainer with `use_aecr` flag
+
+#### 4. Enhanced Configurations ✅
+- [x] Create `configs/binary_config_enhanced.yaml`
+- [x] Create `configs/multi_config_enhanced.yaml`
+- [x] Document all new parameters (attention, CNN, AECR)
+
+### Phase: Class Imbalance Handling ✅ COMPLETED (2025-04)
+
+#### 1. pos_weight Configuration ✅
+- [x] Modify `models/binary/train.py` to support custom pos_weight
+- [x] Allow auto-calculation or custom value in config
+- [x] Default pos_weight=10.0 for ARG detection emphasis
+
+#### 2. Threshold Tuning ✅
+- [x] Add `find_optimal_threshold()` to `utils/metrics.py`
+- [x] Support F1, F2, precision, recall, Youden's J metrics
+- [x] Add `--tune-threshold` and `--tune-metric` to evaluate.py
+- [x] Display metrics at key thresholds (0.3, 0.4, 0.5, 0.6, 0.7)
+
+### Phase: Data Pipeline Improvements ✅ COMPLETED (2025-04)
+
+#### 1. Quality Control Updates ✅
+- [x] Update `scripts/quality_control.py` to retain X/B/Z/J amino acids
+- [x] Only filter sequences with >50% X or invalid characters
+- [x] Support for ambiguous amino acid codes
+
+#### 2. Taxonomy-based Negative Sampling ✅
+- [x] Update `scripts/download_negative_samples.py` with taxoniq integration
+- [x] Filter for prokaryotes only (Bacteria/Archaea)
+- [x] Remove eukaryote-contaminated sequences
+- [x] Comprehensive testing with UniProt/NCBI Taxonomy
+
+#### 3. Data Folder Reorganization ✅
+- [x] Rename existing `data/` to `data_previous/`
+- [x] Create new `data_now/` for cleaned datasets
+- [x] Update all config paths to use `data_now/`
+
+### Phase: Documentation Update ✅ COMPLETED (2025-04)
+
+#### 1. README.md Updates ✅
+- [x] Add "Recent Improvements (2025-04)" section
+- [x] Document Self-Attention, CNN, AECR features
+- [x] Document class imbalance handling strategies
+- [x] Update repository structure with new files
+- [x] Add enhanced config examples
+
+#### 2. CLAUDE.md Updates ✅
+- [x] Add enhanced training commands
+- [x] Update key reminders with new features
+- [x] Document threshold tuning capability
+
+---
+
+## Completed Tasks
+
 ### Phase: Training Visualization and Comprehensive Metrics ✅ COMPLETED
 
 #### 1. Create Visualization Module ✅

@@ -16,12 +16,23 @@ conda activate gene_pred
 ```
 
 ### Training
+
+**Standard (Baseline) Models:**
 ```bash
 # Binary classification
 python models/binary/train.py --config configs/binary_config.yaml
 
 # Multi-class classification
 python models/multi/train.py --config configs/multi_config.yaml
+```
+
+**Enhanced Models (with Self-Attention + CNN + AECR):**
+```bash
+# Binary classification with enhanced architecture
+python models/binary/train.py --config configs/binary_config_enhanced.yaml
+
+# Multi-class classification with enhanced architecture
+python models/multi/train.py --config configs/multi_config_enhanced.yaml
 ```
 
 ### Inference
@@ -50,6 +61,9 @@ python models/multi/predict.py \
 - **Multi-class Labels**: Label mapping saved in metadata.json for inference consistency
 - **Class Balancing**: Uses pos_weight (binary) and FocalLoss (multi-class)
 - **AMP**: Uses `torch.cuda.amp` (deprecated warnings are OK)
+- **Enhanced Features**: Self-Attention, Multi-scale CNN, AECR regularization available via enhanced configs
+- **Threshold Tuning**: Use `--tune-threshold` in evaluate.py for imbalanced data scenarios
+- **Data Preparation**: Use `scripts/quality_control.py` and `scripts/download_negative_samples.py` for data prep
 
 ## Documentation Files
 

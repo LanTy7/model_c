@@ -4,7 +4,24 @@ This repository contains deep learning models for **Antibiotic Resistance Gene (
 - **Binary classification**: Identify if a protein sequence is an ARG
 - **Multi-class classification**: Classify ARGs into antibiotic resistance categories
 
-Models use BiLSTM architecture with modular design for maintainability and extensibility.
+Models use **BiLSTM + Self-Attention + Multi-scale CNN** architecture with modular design for maintainability and extensibility.
+
+## Recent Improvements (2025-04)
+
+### 1. Enhanced Architecture (Inspired by MCT-ARG)
+- **Self-Attention Mechanism**: Added multi-head attention after BiLSTM for better focus on important sequence positions
+- **Multi-scale CNN**: Parallel convolutions with kernel sizes [3, 5, 7] to capture local motifs at different scales
+- **AECR Regularization**: Attention Entropy and Continuity Regularization for sharper, smoother attention patterns
+
+### 2. Class Imbalance Handling
+Real-world ARG prevalence is ~0.1-1%, but training data is 1:1 balanced. We implemented:
+- **Custom pos_weight**: Train with `pos_weight > 1` to emphasize positive class recall
+- **Threshold Tuning**: Auto-search optimal classification threshold (optimizing F1/F2) instead of fixed 0.5
+
+### 3. Improved Data Pipeline
+- **Quality Control**: Retain sequences with X/B/Z/J amino acids (model supports them)
+- **Taxonomy Filtering**: Download only prokaryotic (Bacteria/Archaea) negative samples using taxoniq + NCBI Taxonomy
+- **Stratified Splitting**: Maintain category distribution in train/val/test splits
 
 ## Technology Stack
 
@@ -19,16 +36,22 @@ Models use BiLSTM architecture with modular design for maintainability and exten
 
 ```
 configs/                      # YAML configuration files
-  binary_config.yaml         # Binary classification config
-  multi_config.yaml          # Multi-class classification config
+  binary_config.yaml         # Binary classification config (baseline)
+  binary_config_enhanced.yaml  # Binary config with attention + CNN + AECR
+  multi_config.yaml          # Multi-class classification config (baseline)
+  multi_config_enhanced.yaml   # Multi-class config with attention + CNN + AECR
 
 models/                       # Modular model implementations
   common/                    # Shared components
-    bilstm.py               # BiLSTM backbone, pooling, classifier head
-    trainer.py              # Unified training framework (AMP, early stopping)
+    bilstm.py               # BiLSTM backbone with optional attention
+    attention.py            # Multi-head self-attention module
+    multiscale_cnn.py       # Multi-scale CNN for local feature extraction
+    aecr_loss.py            # AECR regularization loss
+    trainer.py              # Unified training framework (AMP, early stopping, AECR)
   binary/                    # Binary classification
-    model.py                # BinaryARGClassifier
-    train.py                # Training script
+    model.py                # BinaryARGClassifier (supports attention, CNN)
+    train.py                # Training script (supports pos_weight)
+    evaluate.py             # Evaluation script with threshold tuning
     predict.py              # Inference script
   multi/                     # Multi-class classification
     model.py                # MultiClassARGClassifier + FocalLoss

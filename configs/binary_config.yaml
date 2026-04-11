@@ -27,9 +27,9 @@ training:
   pos_weight: null        # Options: null (auto), or float value (e.g., 10.0)
 
 data:
-  train_csv: "data/train.csv"
-  val_csv: "data/val.csv"
-  test_csv: "data/test.csv"
+  train_csv: "data_now/train.csv"
+  val_csv: "data_now/val.csv"
+  test_csv: "data_now/test.csv"
   pos_neg_ratio: 1
 
 paths:
