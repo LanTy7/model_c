@@ -300,13 +300,17 @@ def find_optimal_threshold(
     if metric == 'f1':
         best_idx = df['f1'].idxmax()
     elif metric == 'f2':
-        # Recalculate F2 specifically if beta != 2
-        if beta != 2.0:
-            df['f2'] = df.apply(
-                lambda row: 5 * row['precision'] * row['recall'] /
-                           max(4 * row['precision'] + row['recall'], 1e-10),
-                axis=1
-            )
+        # Ensure f2 column exists
+        if 'f2' not in df.columns:
+            # Create f2 column from f_beta values or recalculate
+            if f'f{beta}' in df.columns and beta == 2.0:
+                df['f2'] = df[f'f{beta}']
+            else:
+                df['f2'] = df.apply(
+                    lambda row: 5 * row['precision'] * row['recall'] /
+                               max(4 * row['precision'] + row['recall'], 1e-10),
+                    axis=1
+                )
         best_idx = df['f2'].idxmax()
     elif metric == 'precision':
         best_idx = df['precision'].idxmax()
