@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 
 
+from typing import Union, Tuple
 class BiLSTMAttentionBackbone(nn.Module):
     """
     BiLSTM backbone with optional self-attention layer.
@@ -67,7 +68,7 @@ class BiLSTMAttentionBackbone(nn.Module):
         x: torch.Tensor,
         mask: torch.Tensor = None,
         return_attention: bool = False
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Args:
             x: Input tensor (batch, seq_len, input_size)

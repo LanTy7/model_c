@@ -1,5 +1,6 @@
 """Multi-class classification model for ARG categories."""
 import torch
+from typing import Union, Tuple
 import torch.nn as nn
 from models.common.bilstm import (
     BiLSTMBackbone, BiLSTMAttentionBackbone, GlobalPooling, ClassifierHead

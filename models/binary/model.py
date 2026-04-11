@@ -1,5 +1,6 @@
 """Binary classification model for ARG identification."""
 import torch
+from typing import Union, Tuple
 import torch.nn as nn
 from models.common.bilstm import (
     BiLSTMBackbone, BiLSTMAttentionBackbone, GlobalPooling, ClassifierHead
@@ -105,7 +106,7 @@ class BinaryARGClassifier(nn.Module):
         self,
         x: torch.Tensor,
         return_attention: bool = False
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Args:
             x: Input indices (batch, seq_len)

@@ -5,6 +5,7 @@ using convolutional layers with different kernel sizes, capturing motifs
 of varying lengths (e.g., 3-mers, 5-mers, 7-mers).
 """
 import torch
+from typing import Union, Tuple
 import torch.nn as nn
 import torch.nn.functional as F
 
