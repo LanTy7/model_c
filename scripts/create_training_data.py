@@ -423,10 +423,21 @@ def main(
         if os.path.exists(temp_merged):
             os.remove(temp_merged)
 
-        # Perform split with clustering
-        train_seqs, val_seqs, test_seqs = stratified_split_with_clustering(
-            all_sequences, cluster_mapping, train_ratio, val_ratio, test_ratio, seed
-        )
+        # Check if clustering produced reasonable results
+        num_clusters = len(set(cluster_mapping.values()))
+        min_clusters_needed = int(10 / min(train_ratio, val_ratio, test_ratio))  # At least 10 per split
+
+        if num_clusters < min_clusters_needed:
+            logger.warning(f"CD-HIT produced only {num_clusters} clusters, need at least {min_clusters_needed}")
+            logger.warning("Falling back to standard stratified split (sequences are already CD-HIT dereplicated)")
+            train_seqs, val_seqs, test_seqs = stratified_split(
+                all_sequences, train_ratio, val_ratio, test_ratio, seed
+            )
+        else:
+            # Perform split with clustering
+            train_seqs, val_seqs, test_seqs = stratified_split_with_clustering(
+                all_sequences, cluster_mapping, train_ratio, val_ratio, test_ratio, seed
+            )
     else:
         # Standard split without clustering
         train_seqs, val_seqs, test_seqs = stratified_split(
@@ -528,6 +539,6 @@ if __name__ == "__main__":
         val_ratio=0.1,
         test_ratio=0.1,
         use_clustering=True,  # Enable data leakage prevention
-        cluster_identity=0.5,  # 50% sequence identity threshold
+        cluster_identity=0.9,  # 90% sequence identity - only true duplicates cluster together
         seed=42
     )
