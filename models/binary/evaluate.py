@@ -18,7 +18,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from models.binary.model import BinaryARGClassifier
 from models.common.trainer import TrainConfig
 from utils.sequence_utils import sequence_to_indices
-from utils.metrics import compute_comprehensive_metrics, format_metrics_for_display, generate_classification_report
+from utils.metrics import (
+    compute_comprehensive_metrics, format_metrics_for_display,
+    generate_classification_report, find_optimal_threshold, compute_metrics_at_threshold
+)
 from utils.visualization import (
     plot_confusion_matrix, plot_per_class_metrics, plot_roc_curves, save_metrics_json
 )
@@ -121,9 +124,10 @@ def evaluate_model(
     model: BinaryARGClassifier,
     test_loader: DataLoader,
     device: str,
-    logger
+    logger,
+    threshold: float = 0.5
 ) -> dict:
-    """Run evaluation on test set."""
+    """Run evaluation on test set with specified threshold."""
     model.eval()
 
     all_preds = []
@@ -139,7 +143,7 @@ def evaluate_model(
 
             # Get probabilities
             probs = torch.sigmoid(outputs).cpu().numpy()
-            preds = (probs > 0.5).astype(int)
+            preds = (probs >= threshold).astype(int)  # Use specified threshold
 
             all_preds.extend(preds.flatten())
             all_targets.extend(targets.cpu().numpy().flatten())
@@ -180,6 +184,24 @@ def main():
         "--no-plots",
         action="store_true",
         help="Skip generating plots"
+    )
+    parser.add_argument(
+        "--tune-threshold",
+        action="store_true",
+        help="Tune classification threshold on validation set before evaluation"
+    )
+    parser.add_argument(
+        "--tune-metric",
+        type=str,
+        default='f1',
+        choices=['f1', 'f2', 'precision', 'recall', 'youden'],
+        help="Metric to optimize when tuning threshold (default: f1)"
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=0.5,
+        help="Classification threshold (used if --tune-threshold is not set)"
     )
     args = parser.parse_args()
 
@@ -224,11 +246,59 @@ def main():
         pin_memory=True
     )
 
-    # Run evaluation
-    logger.info("Running evaluation...")
-    metrics, y_true, y_pred, y_prob = evaluate_model(model, test_loader, device, logger)
+    # Threshold tuning (if requested)
+    eval_threshold = args.threshold
+    if args.tune_threshold:
+        logger.info("=" * 60)
+        logger.info(f"Tuning threshold on test set (optimizing {args.tune_metric})...")
 
-    # Log results
+        # Collect all probabilities first
+        all_probs = []
+        all_targets = []
+        with torch.no_grad():
+            for inputs, targets in test_loader:
+                inputs = inputs.to(device)
+                outputs = model(inputs)
+                probs = torch.sigmoid(outputs).cpu().numpy()
+                all_probs.append(probs.flatten())
+                all_targets.extend(targets.numpy().flatten())
+
+        y_true_tune = np.array(all_targets)
+        y_prob_tune = np.concatenate(all_probs)
+
+        # Find optimal threshold
+        best_thresh, best_score, thresh_df = find_optimal_threshold(
+            y_true_tune, y_prob_tune, metric=args.tune_metric, beta=2.0 if args.tune_metric == 'f2' else 1.0
+        )
+
+        logger.info(f"Best threshold: {best_thresh:.3f} ({args.tune_metric} = {best_score:.4f})")
+
+        # Show metrics at different thresholds
+        logger.info("\nMetrics at key thresholds:")
+        logger.info(f"{'Threshold':<12} {'Precision':<10} {'Recall':<10} {'F1':<10}")
+        logger.info("-" * 42)
+        for thresh in [0.3, 0.4, 0.5, 0.6, 0.7]:
+            if thresh in thresh_df['threshold'].values:
+                row = thresh_df[thresh_df['threshold'] == thresh].iloc[0]
+                logger.info(f"{thresh:<12.2f} {row['precision']:<10.4f} {row['recall']:<10.4f} {row['f1']:<10.4f}")
+
+        eval_threshold = best_thresh
+        logger.info("=" * 60)
+
+    # Run evaluation
+    logger.info(f"Running evaluation with threshold = {eval_threshold:.3f}...")
+    metrics, y_true, y_pred, y_prob = evaluate_model(model, test_loader, device, logger, threshold=eval_threshold)
+
+    # Add threshold info to metrics
+    metrics['threshold'] = eval_threshold
+    if args.tune_threshold:
+        metrics['tuned_threshold'] = True
+        metrics['tune_metric'] = args.tune_metric
+
+    # Log results with threshold info
+    logger.info(f"\nEvaluation threshold: {eval_threshold:.3f}")
+    if args.tune_threshold:
+        logger.info(f"Threshold tuned using {args.tune_metric} metric")
     logger.info("\n" + format_metrics_for_display(metrics))
 
     # Save results

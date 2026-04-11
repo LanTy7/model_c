@@ -226,3 +226,126 @@ def format_metrics_for_display(metrics: Dict[str, Any]) -> str:
     lines.append("=" * 60)
 
     return "\n".join(lines)
+
+
+def find_optimal_threshold(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    metric: str = 'f1',
+    beta: float = 1.0,
+    thresholds: Optional[np.ndarray] = None
+) -> tuple:
+    """
+    Find optimal classification threshold for binary classification.
+
+    This function searches for the threshold that maximizes a given metric,
+    useful for handling imbalanced datasets where the default 0.5 threshold
+    may not be optimal.
+
+    Args:
+        y_true: Ground truth labels (binary: 0 or 1)
+        y_prob: Predicted probabilities for the positive class
+        metric: Metric to optimize ('f1', 'f2', 'precision', 'recall', 'youden')
+        beta: Beta value for F-beta score (default 1.0 for F1, use 2.0 for F2)
+        thresholds: Array of thresholds to try (default: 0.01 to 0.99 in 0.01 steps)
+
+    Returns:
+        Tuple of (best_threshold, best_score, threshold_metrics_df)
+        where threshold_metrics_df is a DataFrame with metrics for all thresholds
+
+    Example:
+        >>> y_true = np.array([0, 0, 1, 1])
+        >>> y_prob = np.array([0.1, 0.4, 0.6, 0.9])
+        >>> best_thresh, best_score, _ = find_optimal_threshold(y_true, y_prob, metric='f1')
+        >>> print(f"Best threshold: {best_thresh:.3f}, F1: {best_score:.4f}")
+    """
+    if thresholds is None:
+        thresholds = np.arange(0.01, 1.0, 0.01)
+
+    # Store metrics for each threshold
+    results = []
+
+    for thresh in thresholds:
+        y_pred = (y_prob >= thresh).astype(int)
+
+        # Compute metrics
+        prec = precision_score(y_true, y_pred, zero_division=0)
+        rec = recall_score(y_true, y_pred, zero_division=0)
+
+        # Compute F-beta score
+        if prec + rec > 0:
+            f_beta = (1 + beta**2) * (prec * rec) / (beta**2 * prec + rec)
+        else:
+            f_beta = 0.0
+
+        # Compute Youden's J statistic (sensitivity + specificity - 1)
+        tn = np.sum((y_true == 0) & (y_pred == 0))
+        fp = np.sum((y_true == 0) & (y_pred == 1))
+        specificity = tn / max(tn + fp, 1e-10)
+        youden = rec + specificity - 1
+
+        results.append({
+            'threshold': thresh,
+            'precision': prec,
+            'recall': rec,
+            'f1': f_beta if beta == 1.0 else f_beta,  # F1 when beta=1
+            f'f{beta}': f_beta,
+            'youden': youden
+        })
+
+    # Convert to DataFrame
+    df = pd.DataFrame(results)
+
+    # Find best threshold based on metric
+    if metric == 'f1':
+        best_idx = df['f1'].idxmax()
+    elif metric == 'f2':
+        # Recalculate F2 specifically if beta != 2
+        if beta != 2.0:
+            df['f2'] = df.apply(
+                lambda row: 5 * row['precision'] * row['recall'] /
+                           max(4 * row['precision'] + row['recall'], 1e-10),
+                axis=1
+            )
+        best_idx = df['f2'].idxmax()
+    elif metric == 'precision':
+        best_idx = df['precision'].idxmax()
+    elif metric == 'recall':
+        best_idx = df['recall'].idxmax()
+    elif metric == 'youden':
+        best_idx = df['youden'].idxmax()
+    else:
+        raise ValueError(f"Unknown metric: {metric}. Choose from 'f1', 'f2', 'precision', 'recall', 'youden'")
+
+    best_threshold = df.loc[best_idx, 'threshold']
+    best_score = df.loc[best_idx, metric]
+
+    return best_threshold, best_score, df
+
+
+def compute_metrics_at_threshold(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    threshold: float = 0.5
+) -> Dict[str, float]:
+    """
+    Compute metrics at a specific threshold.
+
+    Args:
+        y_true: Ground truth labels
+        y_prob: Predicted probabilities
+        threshold: Classification threshold
+
+    Returns:
+        Dictionary of metrics
+    """
+    y_pred = (y_prob >= threshold).astype(int)
+
+    return {
+        'threshold': threshold,
+        'accuracy': accuracy_score(y_true, y_pred),
+        'precision': precision_score(y_true, y_pred, zero_division=0),
+        'recall': recall_score(y_true, y_pred, zero_division=0),
+        'f1': f1_score(y_true, y_pred, zero_division=0),
+        'mcc': matthews_corrcoef(y_true, y_pred)
+    }

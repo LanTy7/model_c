@@ -94,10 +94,20 @@ def create_dataloaders(config: dict, logger) -> Tuple[DataLoader, DataLoader, fl
     logger.info("Loading validation data...")
     val_seqs, val_labels = load_data(config['data']['val_csv'], logger)
 
-    # Compute pos_weight
+    # Compute or get pos_weight
     n_pos = sum(train_labels)
     n_neg = len(train_labels) - n_pos
-    pos_weight = n_neg / max(n_pos, 1)
+    auto_pos_weight = n_neg / max(n_pos, 1)
+
+    # Check if custom pos_weight is specified in config
+    custom_pos_weight = config['training'].get('pos_weight')
+    if custom_pos_weight is not None:
+        pos_weight = float(custom_pos_weight)
+        logger.info(f"Using custom pos_weight: {pos_weight:.4f} "
+                   f"(auto-calculated would be: {auto_pos_weight:.4f})")
+    else:
+        pos_weight = auto_pos_weight
+        logger.info(f"Using auto-calculated pos_weight: {pos_weight:.4f}")
 
     # Create datasets
     train_dataset = BinarySequenceDataset(train_seqs, train_labels, max_length)
