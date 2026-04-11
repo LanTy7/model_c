@@ -1,6 +1,11 @@
 """
 Create unified training dataset by merging positive (ARG) and negative (non-ARG) samples.
 Outputs train/val/test splits with stratification for both binary and multi-class tasks.
+
+Data Leakage Prevention:
+- Uses CD-HIT clustering to group similar sequences
+- All sequences in the same cluster are assigned to the same split (train/val/test)
+- This ensures no high-similarity sequences between train and test sets
 """
 
 import os
@@ -8,7 +13,8 @@ import re
 import json
 import logging
 import random
-from typing import List, Dict, Tuple
+import subprocess
+from typing import List, Dict, Tuple, Set
 from collections import defaultdict, Counter
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -74,6 +80,171 @@ def extract_metadata(header: str, sequence: str, is_arg: int, default_category: 
         'category': category if is_arg == 1 else 'non_arg',
         'arg_category': category if is_arg == 1 else None
     }
+
+
+def run_cd_hit_clustering(
+    input_fasta: str,
+    output_dir: str,
+    identity_threshold: float = 0.5,
+    coverage_threshold: float = 0.8
+) -> Dict[str, int]:
+    """
+    Run CD-HIT clustering to group similar sequences.
+    Returns a dictionary mapping sequence ID to cluster ID.
+
+    Args:
+        input_fasta: Path to input FASTA file
+        output_dir: Output directory for temporary files
+        identity_threshold: Sequence identity threshold (default 0.5 = 50%)
+        coverage_threshold: Alignment coverage threshold (default 0.8 = 80%)
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    output_prefix = os.path.join(output_dir, 'cdhit_clustered')
+
+    logger.info(f"Running CD-HIT clustering (identity: {identity_threshold:.0%}, coverage: {coverage_threshold:.0%})...")
+
+    # CD-HIT command with coverage parameters
+    cmd = (
+        f"cd-hit -i {input_fasta} -o {output_prefix} "
+        f"-c {identity_threshold} -n 3 -d 0 -M 16000 -T 8 "
+        f"-aS {coverage_threshold} -aL {coverage_threshold}"
+    )
+
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    if result.returncode != 0:
+        logger.error(f"CD-HIT failed: {result.stderr}")
+        raise RuntimeError("CD-HIT clustering failed")
+
+    # Parse cluster file to get sequence to cluster mapping
+    cluster_file = output_prefix + '.clstr'
+    seq_to_cluster = {}
+
+    with open(cluster_file, 'r') as f:
+        current_cluster = None
+        for line in f:
+            line = line.strip()
+            if line.startswith('>Cluster'):
+                current_cluster = int(line.split()[1])
+            elif line and current_cluster is not None:
+                # Extract sequence ID from line like:
+                # 0\t147aa, >sp|Q9RYX6|... *\n or
+                # 1\t302aa, >sp|P0A5D1|... at 1:302:1:302/+/62.58%
+                parts = line.split('>')
+                if len(parts) >= 2:
+                    seq_id = parts[1].split()[0].split('|')[0]  # Get ID before any spaces or pipes
+                    seq_to_cluster[seq_id] = current_cluster
+
+    logger.info(f"CD-HIT clustering complete: {len(set(seq_to_cluster.values()))} clusters")
+    logger.info(f"  Sequences assigned to clusters: {len(seq_to_cluster)}")
+
+    # Clean up temporary files
+    for ext in ['', '.clstr']:
+        temp_file = output_prefix + ext
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+
+    return seq_to_cluster
+
+
+def stratified_split_with_clustering(
+    sequences: List[Dict],
+    cluster_mapping: Dict[str, int],
+    train_ratio=0.8,
+    val_ratio=0.1,
+    test_ratio=0.1,
+    seed=42
+) -> Tuple[List[Dict], List[Dict], List[Dict]]:
+    """
+    Perform stratified split with data leakage prevention via clustering.
+    All sequences in the same cluster are assigned to the same split.
+
+    Args:
+        sequences: List of sequence dictionaries
+        cluster_mapping: Dictionary mapping sequence ID to cluster ID
+        train_ratio: Training set ratio
+        val_ratio: Validation set ratio
+        test_ratio: Test set ratio
+        seed: Random seed
+    """
+    assert abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6, "Ratios must sum to 1.0"
+
+    random.seed(seed)
+
+    # Group sequences by cluster
+    cluster_to_seqs = defaultdict(list)
+    for seq in sequences:
+        cluster_id = cluster_mapping.get(seq['id'], -1)  # -1 for unclustered
+        cluster_to_seqs[cluster_id].append(seq)
+
+    logger.info(f"Total clusters: {len(cluster_to_seqs)}")
+    logger.info(f"  Clustered sequences: {sum(len(v) for k, v in cluster_to_seqs.items() if k != -1)}")
+    logger.info(f"  Unclustered sequences: {len(cluster_to_seqs.get(-1, []))}")
+
+    # Group clusters by (is_arg, category) for stratification
+    cluster_groups = defaultdict(list)
+    for cluster_id, seqs in cluster_to_seqs.items():
+        # Use the dominant class in the cluster
+        is_arg = seqs[0]['is_arg']
+        category = seqs[0]['category']
+        cluster_groups[(is_arg, category)].append(cluster_id)
+
+    train_clusters, val_clusters, test_clusters = [], [], []
+
+    # Split each group
+    for (is_arg, category), clusters in cluster_groups.items():
+        n = len(clusters)
+
+        if n < 3:
+            # Very small groups go entirely to train
+            train_clusters.extend(clusters)
+            logger.warning(f"Group ({is_arg}, {category}) has only {n} clusters, all to train")
+            continue
+
+        # Shuffle clusters
+        shuffled = clusters.copy()
+        random.shuffle(shuffled)
+
+        # Calculate split sizes
+        n_train = int(n * train_ratio)
+        n_val = int(n * val_ratio)
+        n_test = n - n_train - n_val
+
+        # Ensure at least 1 cluster per split if group is large enough
+        if n >= 10:
+            n_val = max(1, n_val)
+            n_test = max(1, n_test)
+            n_train = n - n_val - n_test
+
+        # Split
+        train_clusters.extend(shuffled[:n_train])
+        val_clusters.extend(shuffled[n_train:n_train + n_val])
+        test_clusters.extend(shuffled[n_train + n_val:n_train + n_val + n_test])
+
+    # Collect sequences from clusters
+    train_seqs = []
+    for cid in train_clusters:
+        train_seqs.extend(cluster_to_seqs[cid])
+
+    val_seqs = []
+    for cid in val_clusters:
+        val_seqs.extend(cluster_to_seqs[cid])
+
+    test_seqs = []
+    for cid in test_clusters:
+        test_seqs.extend(cluster_to_seqs[cid])
+
+    # Final shuffle
+    random.shuffle(train_seqs)
+    random.shuffle(val_seqs)
+    random.shuffle(test_seqs)
+
+    logger.info(f"Split by clusters:")
+    logger.info(f"  Train: {len(train_clusters)} clusters -> {len(train_seqs)} sequences")
+    logger.info(f"  Val:   {len(val_clusters)} clusters -> {len(val_seqs)} sequences")
+    logger.info(f"  Test:  {len(test_clusters)} clusters -> {len(test_seqs)} sequences")
+
+    return train_seqs, val_seqs, test_seqs
 
 
 def stratified_split(
@@ -176,24 +347,29 @@ def save_to_fasta(sequences: List[Dict], filepath: str):
 
 
 def main(
-    positive_fasta: str = './data/qc_retained.fasta',
-    negative_fasta: str = './data/negative_samples_refined.fasta',
-    output_dir: str = './data',
+    positive_fasta: str = './data_now/qc_retained.fasta',
+    negative_fasta: str = './data_now/negative_samples_for_training.fasta',
+    output_dir: str = './data_now',
     train_ratio: float = 0.8,
     val_ratio: float = 0.1,
     test_ratio: float = 0.1,
+    use_clustering: bool = True,
+    cluster_identity: float = 0.5,
     seed: int = 42
 ):
     """
     Create unified training dataset from positive and negative samples.
+    Prevents data leakage by clustering similar sequences before splitting.
 
     Args:
         positive_fasta: Path to ARG sequences (qc_retained.fasta)
-        negative_fasta: Path to non-ARG sequences (negative_samples_refined.fasta)
+        negative_fasta: Path to non-ARG sequences (negative_samples_for_training.fasta)
         output_dir: Output directory
         train_ratio: Training set ratio (default: 0.8)
         val_ratio: Validation set ratio (default: 0.1)
         test_ratio: Test set ratio (default: 0.1)
+        use_clustering: If True, use CD-HIT clustering to prevent data leakage
+        cluster_identity: Sequence identity threshold for clustering (default: 0.5 = 50%)
         seed: Random seed for reproducibility
     """
     os.makedirs(output_dir, exist_ok=True)
@@ -201,6 +377,10 @@ def main(
 
     logger.info("=" * 60)
     logger.info("Creating Unified Training Dataset")
+    if use_clustering:
+        logger.info("  Data Leakage Prevention: ENABLED (CD-HIT clustering)")
+    else:
+        logger.info("  Data Leakage Prevention: DISABLED")
     logger.info("=" * 60)
 
     # Step 1: Load positive samples (ARG)
@@ -226,11 +406,32 @@ def main(
     logger.info(f"  ARG: {len(positive_seqs)} ({len(positive_seqs)/len(all_sequences)*100:.1f}%)")
     logger.info(f"  non-ARG: {len(negative_seqs)} ({len(negative_seqs)/len(all_sequences)*100:.1f}%)")
 
-    # Step 4: Stratified split
+    # Step 4: Stratified split with optional clustering
     logger.info(f"\nStep 4: Stratified split ({train_ratio:.0%}:{val_ratio:.0%}:{test_ratio:.0%})")
-    train_seqs, val_seqs, test_seqs = stratified_split(
-        all_sequences, train_ratio, val_ratio, test_ratio, seed
-    )
+
+    if use_clustering:
+        # Save merged sequences to temp file for clustering
+        temp_merged = os.path.join(output_dir, 'temp_merged_for_clustering.fasta')
+        save_to_fasta(all_sequences, temp_merged)
+
+        # Run CD-HIT clustering
+        logger.info(f"\nRunning CD-HIT clustering (identity: {cluster_identity:.0%})...")
+        logger.info("This prevents similar sequences from appearing in different splits")
+        cluster_mapping = run_cd_hit_clustering(temp_merged, output_dir, cluster_identity)
+
+        # Clean up temp file
+        if os.path.exists(temp_merged):
+            os.remove(temp_merged)
+
+        # Perform split with clustering
+        train_seqs, val_seqs, test_seqs = stratified_split_with_clustering(
+            all_sequences, cluster_mapping, train_ratio, val_ratio, test_ratio, seed
+        )
+    else:
+        # Standard split without clustering
+        train_seqs, val_seqs, test_seqs = stratified_split(
+            all_sequences, train_ratio, val_ratio, test_ratio, seed
+        )
 
     logger.info(f"\nSplit results:")
     logger.info(f"  Train: {len(train_seqs)} ({len(train_seqs)/len(all_sequences)*100:.1f}%)")
@@ -276,6 +477,10 @@ def main(
         'num_categories': len(pos_categories),
         'split_ratios': {'train': train_ratio, 'val': val_ratio, 'test': test_ratio},
         'random_seed': seed,
+        'data_leakage_prevention': {
+            'enabled': use_clustering,
+            'cluster_identity_threshold': cluster_identity if use_clustering else None
+        },
         'splits': {
             'train': {
                 'count': len(train_seqs),
@@ -316,11 +521,13 @@ def main(
 
 if __name__ == "__main__":
     main(
-        positive_fasta='./data/qc_retained.fasta',
-        negative_fasta='./data/negative_samples_refined.fasta',
-        output_dir='./data',
+        positive_fasta='./data_now/qc_retained.fasta',
+        negative_fasta='./data_now/negative_samples_for_training.fasta',
+        output_dir='./data_now',
         train_ratio=0.8,
         val_ratio=0.1,
         test_ratio=0.1,
+        use_clustering=True,  # Enable data leakage prevention
+        cluster_identity=0.5,  # 50% sequence identity threshold
         seed=42
     )
