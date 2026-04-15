@@ -58,7 +58,7 @@ models/                       # Modular model implementations
     train.py                # Training script
     predict.py              # Inference script
 
-data/                        # Dataset storage
+data_now/                        # Dataset storage
   train.csv                 # Training data (sequence + labels)
   val.csv                   # Validation data
   test.csv                  # Test data
