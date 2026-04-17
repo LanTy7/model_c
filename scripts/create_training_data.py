@@ -570,8 +570,8 @@ def main(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create unified training dataset")
     parser.add_argument("--positive-fasta", type=str, default="/home/mayue/ARGMind/data/ARG_DB.fasta")
-    parser.add_argument("--negative-fasta", type=str, default="./data/Non_ARG_DB.fasta")
-    parser.add_argument("--output-dir", type=str, default="./data")
+    parser.add_argument("--negative-fasta", type=str, default="/home/mayue/ARGMind/data/Non_ARG_DB.fasta")
+    parser.add_argument("--output-dir", type=str, default="/home/mayue/ARGMind/data")
     parser.add_argument("--train-ratio", type=float, default=0.8)
     parser.add_argument("--val-ratio", type=float, default=0.1)
     parser.add_argument("--test-ratio", type=float, default=0.1)
