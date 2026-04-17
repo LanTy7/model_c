@@ -157,10 +157,11 @@ def main(config_path: str):
         aecr_lambda_loc=training_config.get('aecr_lambda_loc', 0.5)
     )
 
-    # Define metric function for early stopping (use validation F1)
+    # Define metric function for early stopping (use validation F2)
+    # F2 emphasizes recall, which is critical for ARG detection (avoid missing ARGs)
     def val_metric_fn(targets, preds, probs):
-        from sklearn.metrics import f1_score
-        return f1_score(targets, preds, average='binary', zero_division=0)
+        from sklearn.metrics import fbeta_score
+        return fbeta_score(targets, preds, beta=2.0, average='binary', zero_division=0)
 
     # Trainer
     trainer = Trainer(
