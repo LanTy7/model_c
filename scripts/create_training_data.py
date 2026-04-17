@@ -86,7 +86,7 @@ def extract_metadata(header: str, sequence: str, is_arg: int, default_category: 
 def run_cd_hit_clustering(
     input_fasta: str,
     output_dir: str,
-    identity_threshold: float = 0.5,
+    identity_threshold: float = 0.7,
     coverage_threshold: float = 0.8
 ) -> Dict[str, int]:
     """
@@ -96,7 +96,7 @@ def run_cd_hit_clustering(
     Args:
         input_fasta: Path to input FASTA file
         output_dir: Output directory for temporary files
-        identity_threshold: Sequence identity threshold (default 0.5 = 50%)
+        identity_threshold: Sequence identity threshold (default 0.7 = 70%)
         coverage_threshold: Alignment coverage threshold (default 0.8 = 80%)
     """
     os.makedirs(output_dir, exist_ok=True)
@@ -105,10 +105,18 @@ def run_cd_hit_clustering(
 
     logger.info(f"Running CD-HIT clustering (identity: {identity_threshold:.0%}, coverage: {coverage_threshold:.0%})...")
 
+    # CD-HIT word size: higher threshold requires larger word size
+    if identity_threshold >= 0.7:
+        word_size = 5
+    elif identity_threshold >= 0.6:
+        word_size = 4
+    else:
+        word_size = 3
+
     # CD-HIT command with coverage parameters
     cmd = (
         f"cd-hit -i {input_fasta} -o {output_prefix} "
-        f"-c {identity_threshold} -n 3 -d 0 -M 16000 -T 8 "
+        f"-c {identity_threshold} -n {word_size} -d 0 -M 16000 -T 8 "
         f"-aS {coverage_threshold} -aL {coverage_threshold}"
     )
 
@@ -364,7 +372,7 @@ def main(
     val_ratio: float = 0.1,
     test_ratio: float = 0.1,
     use_clustering: bool = True,
-    cluster_identity: float = 0.5,
+    cluster_identity: float = 0.7,
     seed: int = 42
 ):
     """
@@ -379,7 +387,7 @@ def main(
         val_ratio: Validation set ratio (default: 0.1)
         test_ratio: Test set ratio (default: 0.1)
         use_clustering: If True, use CD-HIT clustering to prevent data leakage
-        cluster_identity: Sequence identity threshold for clustering (default: 0.5 = 50%)
+        cluster_identity: Sequence identity threshold for clustering (default: 0.7 = 70%)
         seed: Random seed for reproducibility
     """
     os.makedirs(output_dir, exist_ok=True)
@@ -388,7 +396,7 @@ def main(
     logger.info("=" * 60)
     logger.info("Creating Unified Training Dataset")
     if use_clustering:
-        logger.info("  Data Leakage Prevention: ENABLED (CD-HIT clustering)")
+        logger.info(f"  Data Leakage Prevention: ENABLED (CD-HIT clustering, identity={cluster_identity:.0%})")
     else:
         logger.info("  Data Leakage Prevention: DISABLED")
     logger.info("=" * 60)
@@ -440,8 +448,22 @@ def main(
             os.remove(temp_merged)
 
         # Check if clustering produced reasonable results
-        num_clusters = len(set(cluster_mapping.values()))
+        cluster_ids = list(cluster_mapping.values())
+        num_clusters = len(set(cluster_ids))
         min_clusters_needed = int(10 / min(train_ratio, val_ratio, test_ratio))  # At least 10 per split
+
+        # Compute cluster size distribution
+        from collections import Counter
+        cluster_size_counts = Counter(cluster_ids)
+        sizes = list(cluster_size_counts.values())
+        largest = max(sizes)
+        singletons = sum(1 for s in sizes if s == 1)
+        medium = sum(1 for s in sizes if 2 <= s <= 10)
+        large = sum(1 for s in sizes if s > 10)
+
+        logger.info(f"  Clusters: {num_clusters}")
+        logger.info(f"  Largest cluster: {largest} sequences")
+        logger.info(f"  Distribution: {singletons} singletons, {medium} small (2-10), {large} large (>10)")
 
         if num_clusters < min_clusters_needed:
             logger.warning(f"CD-HIT produced only {num_clusters} clusters, need at least {min_clusters_needed}")
@@ -555,7 +577,14 @@ if __name__ == "__main__":
     parser.add_argument("--val-ratio", type=float, default=0.1)
     parser.add_argument("--test-ratio", type=float, default=0.1)
     parser.add_argument("--use-clustering", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--cluster-identity", type=float, default=0.5)
+    parser.add_argument(
+        "--cluster-identity",
+        type=float,
+        default=0.7,
+        help="CD-HIT sequence identity threshold for clustering (default: 0.7). "
+             "Higher values cluster more aggressively, preventing data leakage but reducing split diversity. "
+             "Lower values preserve more diversity but increase leakage risk."
+    )
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
