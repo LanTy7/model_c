@@ -6,15 +6,15 @@ model:
   embedding_dim: 128
   hidden_size: 128
   num_layers: 2
-  dropout: 0.5            # 增加: 0.3 -> 0.5 (更强正则化)
+  dropout: 0.5            
   max_length: 1000
 
 training:
   epochs: 100
   batch_size: 256
-  lr: 0.0003              # 降低学习率
-  weight_decay: 0.02      # 增加正则化
-  patience: 10            # 减少耐心，更快早停
+  lr: 0.0003              
+  weight_decay: 0.02      
+  patience: 10           
   grad_clip: 1.0
   warmup_epochs: 5
   use_amp: true

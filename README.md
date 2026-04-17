@@ -20,7 +20,6 @@ Real-world ARG prevalence is ~0.1-1%, but training data is 1:1 balanced. We impl
 
 ### 3. Improved Data Pipeline
 - **Quality Control**: Retain sequences with X/B/Z/J amino acids (model supports them)
-- **Taxonomy Filtering**: Download only prokaryotic (Bacteria/Archaea) negative samples using taxoniq + NCBI Taxonomy
 - **Stratified Splitting**: Maintain category distribution in train/val/test splits
 
 ## Technology Stack

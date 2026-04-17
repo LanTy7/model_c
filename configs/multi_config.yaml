@@ -10,22 +10,22 @@ model:
 training:
   epochs: 150
   batch_size: 256
-  lr: 0.001               # 提高学习率
-  weight_decay: 0.02      # 增强正则化
+  lr: 0.001               
+  weight_decay: 0.02     
   patience: 20
   grad_clip: 1.0
   warmup_epochs: 5
   use_amp: true
   accumulation_steps: 1
   num_workers: 4
-  use_balanced_sampling: false  # 关闭激进采样，改用权重
+  use_balanced_sampling: false  
 
 # Focal Loss parameters
 focal_loss:
-  gamma: 1.0              # 恢复: 1.0 (温和关注难分样本)
-  label_smoothing: 0.05   # 减少平滑
-  class_weight_method: "sqrt"    # 恢复sqrt (温和处理不平衡)
-  class_weight_clip: [0.5, 3.0]  # 收紧范围避免极端权重
+  gamma: 1.0              
+  label_smoothing: 0.05   
+  class_weight_method: "sqrt"    
+  class_weight_clip: [0.5, 3.0]  
 
 data:
   train_csv: "data_now/train.csv"
