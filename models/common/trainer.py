@@ -209,8 +209,8 @@ class Trainer:
                         aecr_loss = aecr_loss * self.config.lambda_aecr
 
                     # Total loss
-                    loss = task_loss + aecr_loss
-                    loss = loss / self.config.accumulation_steps
+                    raw_loss = task_loss + aecr_loss
+                    loss = raw_loss / self.config.accumulation_steps
             else:
                 # Forward pass (with attention if model supports it)
                 if model_uses_attention:
@@ -233,8 +233,8 @@ class Trainer:
                     aecr_loss = aecr_loss * self.config.lambda_aecr
 
                 # Total loss
-                loss = task_loss + aecr_loss
-                loss = loss / self.config.accumulation_steps
+                raw_loss = task_loss + aecr_loss
+                loss = raw_loss / self.config.accumulation_steps
 
             # Backward pass
             if self.config.use_amp:
@@ -263,7 +263,7 @@ class Trainer:
                 if self.scheduler:
                     self.scheduler.step()
 
-            total_loss += loss.item() * self.config.accumulation_steps
+            total_loss += raw_loss.item()
             total_task_loss += task_loss.item()
             if isinstance(aecr_loss, torch.Tensor):
                 total_aecr_loss += aecr_loss.item()
@@ -273,8 +273,10 @@ class Trainer:
 
         # Check for NaN/Inf in training loss
         if not np.isfinite(avg_loss):
-            self.logger.error(f"Non-finite training loss detected: {avg_loss}. This may indicate numerical instability from pos_weight, AMP, or AECR.")
-            # Optionally could raise RuntimeError here; for now we warn strongly.
+            raise RuntimeError(
+                f"Non-finite training loss detected: {avg_loss}. "
+                f"This may indicate numerical instability from pos_weight, AMP, or AECR."
+            )
 
         # Log loss components if AECR is used
         if self.aecr_criterion is not None:
@@ -340,7 +342,7 @@ class Trainer:
         # Compute metrics
         metrics = self._compute_metrics(all_targets, all_preds, all_probs)
 
-        return avg_loss, metrics
+        return avg_loss, metrics, np.array(all_targets), np.array(all_preds), all_probs
 
     def _compute_metrics(
         self,
@@ -400,32 +402,11 @@ class Trainer:
             train_loss = self._train_epoch(train_loader)
 
             # Validate
-            val_loss, val_metrics = self._validate(val_loader)
+            val_loss, val_metrics, val_targets, val_preds, val_probs = self._validate(val_loader)
 
             # Get current metric for early stopping
             if self.metric_fn:
-                # Collect validation predictions for custom metric_fn
-                # Re-run validation to collect raw targets/preds/probs (lightweight)
-                self.model.eval()
-                all_val_targets = []
-                all_val_preds = []
-                all_val_probs = []
-                with torch.no_grad():
-                    for inputs, targets in val_loader:
-                        inputs = inputs.to(self.config.device)
-                        outputs = self.model(inputs)
-                        is_binary = outputs.dim() == 2 and outputs.shape[1] == 1 and targets.dim() == 1
-                        if is_binary:
-                            probs = torch.sigmoid(outputs).cpu().numpy()
-                            preds = (probs > 0.5).astype(int)
-                        else:
-                            probs = torch.softmax(outputs, dim=1).cpu().numpy()
-                            preds = np.argmax(probs, axis=1)
-                        all_val_targets.extend(targets.numpy().flatten())
-                        all_val_preds.extend(preds.flatten())
-                        all_val_probs.append(probs.flatten() if is_binary else probs)
-                all_val_probs = np.concatenate(all_val_probs, axis=0)
-                current_metric = self.metric_fn(np.array(all_val_targets), np.array(all_val_preds), all_val_probs)
+                current_metric = self.metric_fn(val_targets, val_preds, val_probs)
             else:
                 current_metric = -val_loss  # Minimize loss
 
@@ -586,7 +567,7 @@ class Trainer:
 
     def load_checkpoint(self, path: str) -> Dict:
         """Load model checkpoint."""
-        checkpoint = torch.load(path, map_location=self.config.device)
+        checkpoint = torch.load(path, map_location=self.config.device, weights_only=True)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         return checkpoint
 

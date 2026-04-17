@@ -16,7 +16,7 @@ Models use **BiLSTM + Self-Attention + Multi-scale CNN** architecture with modul
 ### 2. Class Imbalance Handling
 Real-world ARG prevalence is ~0.1-1%, but training data is 1:1 balanced. We implemented:
 - **Custom pos_weight**: Train with `pos_weight > 1` to emphasize positive class recall
-- **Threshold Tuning**: Auto-search optimal classification threshold (optimizing F1/F2) instead of fixed 0.5
+- **Threshold Tuning**: Use `models/binary/evaluate.py --tune-threshold` to auto-search optimal classification threshold (optimizing F1/F2) instead of fixed 0.5. Validation metrics during training still use 0.5.
 
 ### 3. Improved Data Pipeline
 - **Quality Control**: Retain sequences with X/B/Z/J amino acids (model supports them)
@@ -53,6 +53,7 @@ models/                       # Modular model implementations
   multi/                     # Multi-class classification
     model.py                # MultiClassARGClassifier + FocalLoss (CNN + Attention + AECR)
     train.py                # Training script
+    evaluate.py             # Evaluation script
     predict.py              # Inference script
 
 data/                        # Dataset storage
@@ -107,6 +108,7 @@ Note: The default configs (`binary_config.yaml` and `multi_config.yaml`) already
 
 **Binary Classification:**
 ```bash
+mkdir -p results
 python models/binary/predict.py \
   -i input.fasta \
   -m checkpoints/binary/binary_best.pth \
@@ -114,7 +116,10 @@ python models/binary/predict.py \
 ```
 
 **Multi-class Classification:**
+> Note: multi-class inference requires `metadata.json` (saved during training) to load class names and `max_length`. By default, `predict.py` looks for it in the same directory as the checkpoint.
+
 ```bash
+mkdir -p results
 python models/multi/predict.py \
   -i input.fasta \
   -m checkpoints/multi/multi_best.pth \
@@ -124,7 +129,7 @@ python models/multi/predict.py \
 ## Key Architecture Decisions
 
 ### Model Configuration
-- **Binary model**: Embedding (vocab_size=22) -> Multi-scale CNN -> BiLSTM + Self-Attention (hidden=128, 2 layers) -> FC
+- **Binary model**: Embedding (vocab_size=25) -> Multi-scale CNN -> BiLSTM + Self-Attention (hidden=128, 2 layers) -> FC
 - **Multi-class model**: One-hot (21 dims) -> Multi-scale CNN -> BiLSTM + Self-Attention (hidden=256, 3 layers) -> FC with Focal Loss
 - **AECR**: Attention Entropy and Continuity Regularization is applied during training by default
 
@@ -151,7 +156,7 @@ python models/multi/predict.py \
 ### Binary Config Example
 ```yaml
 model:
-  vocab_size: 22
+  vocab_size: 25
   embedding_dim: 128
   hidden_size: 128
   num_layers: 2
@@ -164,7 +169,7 @@ model:
 
 training:
   epochs: 100
-  batch_size: 256
+  batch_size: 128
   lr: 0.0005
   weight_decay: 0.02
   patience: 15
@@ -187,13 +192,16 @@ model:
 focal_loss:
   gamma: 1.0
   label_smoothing: 0.1
+  class_weight_method: "sqrt"
+  class_weight_clip: [0.5, 3.0]
 
 training:
   lambda_aecr: 0.1
   aecr_sigma: 3.0
 
 data:
-  min_samples: 40  # Merge rare categories
+  min_samples: 40               # Merge rare categories
+  max_length_percentile: 95     # Compute max length from training data percentile
 ```
 
 ## Performance Tuning Tips
@@ -201,7 +209,7 @@ data:
 1. **Batch Size**: 256 works well for both tasks; reduce if OOM
 2. **Learning Rate**: 0.0005 is a good starting point; use warmup
 3. **Hidden Size**: Binary 128, Multi-class 256
-4. **Dropout**: 0.3 for both (higher if overfitting)
+4. **Dropout**: 0.4 for both (higher if overfitting)
 5. **Num Layers**: Binary 2, Multi-class 3
 
 ## Troubleshooting
@@ -224,7 +232,7 @@ data:
 ## Important Notes
 
 1. **Data Loading**: Always use `train.csv`/`val.csv` with `sequence` column, not FASTA files, to avoid ID conflicts
-2. **Model Checkpointing**: Best model saved based on validation metric (F1 for multi-class, loss for binary)
+2. **Model Checkpointing**: Best model saved based on validation F1 for both binary and multi-class
 3. **Random Seeds**: Fixed seed (42) used for reproducibility in training scripts
 4. **Multi-class Labels**: Must handle "Others" category carefully; label mapping saved in metadata.json
 5. **Mixed Precision**: Uses `torch.cuda.amp` (deprecated warnings are OK)

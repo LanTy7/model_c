@@ -76,8 +76,8 @@ def save_csv(sequences: List[Dict], filepath: str):
 
 
 def main(
-    refined_negative_fasta: str = './data_now/negative_samples_refined.fasta',
-    output_dir: str = './data_now',
+    refined_negative_fasta: str = './data/negative_samples_refined.fasta',
+    output_dir: str = './data',
     target_count: int = 17338,
     seed: int = 42
 ):

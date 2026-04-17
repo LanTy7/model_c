@@ -113,11 +113,9 @@ class MultiClassARGClassifier(nn.Module):
         features = self.cnn(x, mask)  # (batch, seq_len, cnn_output_dim)
 
         # BiLSTM + Attention
-        lstm_out = self.backbone(features, mask, return_attention=False)
-        # Apply attention separately to get weights
-        attention_weights = None
-        if return_attention:
-            _, attention_weights = self.backbone.attention(lstm_out, mask)
+        lstm_out, attention_weights = self.backbone(
+            features, mask, return_attention=return_attention
+        )
 
         # Masked global pooling
         features = self.pooling(lstm_out, mask)  # (batch, hidden*4)

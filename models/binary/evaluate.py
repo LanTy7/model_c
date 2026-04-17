@@ -3,22 +3,21 @@
 import os
 import sys
 import json
-import logging
 import argparse
 from pathlib import Path
 from typing import Tuple, List
 
-import yaml
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from models.binary.model import BinaryARGClassifier
 from models.common.trainer import TrainConfig
-from utils.sequence_utils import sequence_to_indices
+from data.dataset import BinarySequenceDataset
+from utils.common import setup_logging, load_config
 from utils.metrics import (
     compute_comprehensive_metrics, format_metrics_for_display,
     generate_classification_report, find_optimal_threshold, compute_metrics_at_threshold
@@ -26,20 +25,6 @@ from utils.metrics import (
 from utils.visualization import (
     plot_confusion_matrix, plot_per_class_metrics, plot_roc_curves, save_metrics_json
 )
-
-
-def setup_logging(log_dir: str, log_file: str = "evaluate.log"):
-    """Setup logging."""
-    os.makedirs(log_dir, exist_ok=True)
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.FileHandler(os.path.join(log_dir, log_file)),
-            logging.StreamHandler()
-        ]
-    )
-    return logging.getLogger(__name__)
 
 
 def save_threshold_json(
@@ -71,30 +56,6 @@ def save_threshold_json(
     return output_path
 
 
-def load_config(config_path: str) -> dict:
-    """Load YAML configuration."""
-    with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
-
-
-class BinarySequenceDataset(Dataset):
-    """Simple dataset for binary classification."""
-
-    def __init__(self, sequences: List[str], labels: List[int], max_length: int):
-        self.sequences = sequences
-        self.labels = labels
-        self.max_length = max_length
-
-    def __len__(self):
-        return len(self.sequences)
-
-    def __getitem__(self, idx):
-        seq = self.sequences[idx]
-        label = self.labels[idx]
-        encoded = sequence_to_indices(seq, self.max_length)
-        return torch.from_numpy(encoded), torch.tensor(label, dtype=torch.float32)
-
-
 def load_data(csv_path: str, logger) -> Tuple[List[str], List[int]]:
     """Load data from CSV (sequence column)."""
     df = pd.read_csv(csv_path)
@@ -110,7 +71,7 @@ def load_data(csv_path: str, logger) -> Tuple[List[str], List[int]]:
 
 def load_model(checkpoint_path: str, config: dict, device: str) -> Tuple[BinaryARGClassifier, dict]:
     """Load model from checkpoint."""
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
 
     # Use config from YAML file if available, otherwise infer from checkpoint
     if config and 'model' in config:
@@ -122,7 +83,7 @@ def load_model(checkpoint_path: str, config: dict, device: str) -> Tuple[BinaryA
         if embedding_weight is not None:
             vocab_size, embedding_dim = embedding_weight.shape
         else:
-            vocab_size, embedding_dim = 22, 128
+            vocab_size, embedding_dim = 25, 128
 
         # Infer hidden size from LSTM weights
         hidden_size = 128
@@ -138,8 +99,8 @@ def load_model(checkpoint_path: str, config: dict, device: str) -> Tuple[BinaryA
             'embedding_dim': embedding_dim,
             'hidden_size': hidden_size,
             'num_layers': num_layers,
-            'dropout': 0.5,
-            'max_length': 2048
+            'dropout': 0.4,
+            'max_length': 1000
         }
 
     model = BinaryARGClassifier(**model_config)
@@ -273,6 +234,7 @@ def main():
         batch_size=config['training']['batch_size'],
         shuffle=False,
         num_workers=config['training']['num_workers'],
+        persistent_workers=config['training']['num_workers'] > 0,
         pin_memory=True
     )
 
@@ -292,6 +254,7 @@ def main():
             batch_size=config['training']['batch_size'],
             shuffle=False,
             num_workers=config['training']['num_workers'],
+            persistent_workers=config['training']['num_workers'] > 0,
             pin_memory=True
         )
 

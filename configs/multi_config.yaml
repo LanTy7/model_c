@@ -49,21 +49,5 @@ paths:
   log_dir: "./logs/multi"
   fig_dir: "./figures/multi"
 
-# Visualization settings
-visualization:
-  enabled: true
-  format: "png"
-  plots:
-    - training_curves
-    - confusion_matrix
-    - per_class_metrics
-    - roc_curves
-
-# Evaluation settings
-evaluation:
-  compute_per_class: true
-  save_predictions: true
-  save_history: true
-
 device: "cuda"
 seed: 42

@@ -3,7 +3,7 @@
 
 model:
   name: "BinaryARGClassifier"
-  vocab_size: 22
+  vocab_size: 25
   embedding_dim: 128
   hidden_size: 128
   num_layers: 2
@@ -16,7 +16,7 @@ model:
 
 training:
   epochs: 100
-  batch_size: 256
+  batch_size: 128
   lr: 0.0005
   weight_decay: 0.02
   patience: 15
@@ -28,7 +28,7 @@ training:
 
   # Class imbalance handling
   # pos_weight: null means auto-calculate from data (n_neg / n_pos)
-  pos_weight: null
+  pos_weight: 10
 
   # AECR regularization (enabled by default)
   lambda_aecr: 0.1
@@ -40,28 +40,11 @@ data:
   train_csv: "data/train.csv"
   val_csv: "data/val.csv"
   test_csv: "data/test.csv"
-  pos_neg_ratio: 1
 
 paths:
   save_dir: "./checkpoints/binary"
   log_dir: "./logs/binary"
   fig_dir: "./figures/binary"
-
-# Visualization settings
-visualization:
-  enabled: true
-  format: "png"
-  plots:
-    - training_curves
-    - confusion_matrix
-    - per_class_metrics
-    - roc_curves
-
-# Evaluation settings
-evaluation:
-  compute_per_class: true
-  save_predictions: true
-  save_history: true
 
 device: "cuda"
 seed: 42

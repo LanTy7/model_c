@@ -29,12 +29,14 @@ python models/multi/train.py --config configs/multi_config.yaml
 ### Inference
 ```bash
 # Binary classification
+mkdir -p results
 python models/binary/predict.py \
   -i input.fasta \
   -m checkpoints/binary/binary_best.pth \
   -o results/predictions.csv
 
-# Multi-class classification
+# Multi-class classification (requires metadata.json in the same dir as the checkpoint)
+mkdir -p results
 python models/multi/predict.py \
   -i input.fasta \
   -m checkpoints/multi/multi_best.pth \

@@ -2,71 +2,21 @@
 """Training script for binary ARG classification."""
 import os
 import sys
-import logging
 import argparse
 from pathlib import Path
 from typing import Tuple, List
 
-import yaml
-import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from models.binary.model import BinaryARGClassifier
 from models.common.trainer import Trainer, TrainConfig, get_cosine_schedule_with_warmup
-from utils.sequence_utils import sequence_to_indices
-
-
-def setup_logging(log_dir: str, log_file: str = "train.log"):
-    """Setup logging."""
-    os.makedirs(log_dir, exist_ok=True)
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.FileHandler(os.path.join(log_dir, log_file)),
-            logging.StreamHandler()
-        ]
-    )
-    return logging.getLogger(__name__)
-
-
-def set_seed(seed: int = 42):
-    """Set random seed for reproducibility."""
-    import random
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-
-
-def load_config(config_path: str) -> dict:
-    """Load YAML configuration."""
-    with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
-
-
-class BinarySequenceDataset(Dataset):
-    """Simple dataset for binary classification."""
-
-    def __init__(self, sequences: List[str], labels: List[int], max_length: int):
-        self.sequences = sequences
-        self.labels = labels
-        self.max_length = max_length
-
-    def __len__(self):
-        return len(self.sequences)
-
-    def __getitem__(self, idx):
-        seq = self.sequences[idx]
-        label = self.labels[idx]
-        encoded = sequence_to_indices(seq, self.max_length)
-        return torch.from_numpy(encoded), torch.tensor(label, dtype=torch.float32)
+from data.dataset import BinarySequenceDataset
+from utils.common import setup_logging, set_seed, load_config
 
 
 def load_data(csv_path: str, logger) -> Tuple[List[str], List[int]]:
@@ -119,6 +69,7 @@ def create_dataloaders(config: dict, logger) -> Tuple[DataLoader, DataLoader, fl
         batch_size=config['training']['batch_size'],
         shuffle=True,
         num_workers=config['training']['num_workers'],
+        persistent_workers=config['training']['num_workers'] > 0,
         pin_memory=True
     )
 
@@ -127,6 +78,7 @@ def create_dataloaders(config: dict, logger) -> Tuple[DataLoader, DataLoader, fl
         batch_size=config['training']['batch_size'],
         shuffle=False,
         num_workers=config['training']['num_workers'],
+        persistent_workers=config['training']['num_workers'] > 0,
         pin_memory=True
     )
 
@@ -241,6 +193,7 @@ def main(config_path: str):
             batch_size=config['training']['batch_size'],
             shuffle=False,
             num_workers=config['training']['num_workers'],
+            persistent_workers=config['training']['num_workers'] > 0,
             pin_memory=True
         )
 

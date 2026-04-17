@@ -52,7 +52,7 @@ def load_threshold_from_file(checkpoint_dir: str) -> tuple:
 
 def load_model(checkpoint_path: str, device: str = 'cuda'):
     """Load trained model from checkpoint."""
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
 
     # Get model config from checkpoint
     if 'model_config' in checkpoint:
@@ -84,7 +84,7 @@ def load_model(checkpoint_path: str, device: str = 'cuda'):
             'embedding_dim': embedding_dim,
             'hidden_size': hidden_size,
             'num_layers': num_layers,
-            'dropout': 0.3,
+            'dropout': 0.4,
             'max_length': 1000,
             'use_cnn': use_cnn,
             'use_attention': use_attention,

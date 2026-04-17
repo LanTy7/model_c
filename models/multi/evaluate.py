@@ -2,12 +2,10 @@
 """Evaluation script for multi-class ARG classification."""
 import os
 import sys
-import logging
 import argparse
 from pathlib import Path
 from collections import Counter
 
-import yaml
 import numpy as np
 import pandas as pd
 import torch
@@ -18,31 +16,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from models.multi.model import MultiClassARGClassifier
 from models.common.trainer import TrainConfig
 from data.dataset import MultiClassARGDataset
+from utils.common import setup_logging, load_config
 from utils.sequence_utils import get_max_length
 from utils.metrics import compute_comprehensive_metrics, format_metrics_for_display, generate_classification_report
 from utils.visualization import (
     plot_confusion_matrix, plot_per_class_metrics, plot_roc_curves, save_metrics_json
 )
-
-
-def setup_logging(log_dir: str, log_file: str = "evaluate.log"):
-    """Setup logging."""
-    os.makedirs(log_dir, exist_ok=True)
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.FileHandler(os.path.join(log_dir, log_file)),
-            logging.StreamHandler()
-        ]
-    )
-    return logging.getLogger(__name__)
-
-
-def load_config(config_path: str) -> dict:
-    """Load YAML configuration."""
-    with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
 
 
 def load_model(checkpoint_path: str, metadata_path: str, yaml_config: dict, device: str) -> tuple:
@@ -54,7 +33,7 @@ def load_model(checkpoint_path: str, metadata_path: str, yaml_config: dict, devi
         metadata = json.load(f)
 
     # Load checkpoint
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
 
     # Get model config from YAML config
     num_classes = metadata['num_classes']
@@ -81,7 +60,7 @@ def load_model(checkpoint_path: str, metadata_path: str, yaml_config: dict, devi
             'input_size': 21,
             'hidden_size': hidden_size,
             'num_layers': num_layers,
-            'dropout': 0.5,
+            'dropout': 0.4,
             'num_classes': num_classes
         }
 
@@ -228,6 +207,7 @@ def main():
         batch_size=config['training']['batch_size'],
         shuffle=False,
         num_workers=config['training']['num_workers'],
+        persistent_workers=config['training']['num_workers'] > 0,
         pin_memory=True
     )
 

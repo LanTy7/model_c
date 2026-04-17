@@ -103,27 +103,21 @@ def stratified_split(sequences: List[Dict], train_ratio=0.8, val_ratio=0.1, test
         shuffled = group.copy()
         random.shuffle(shuffled)
 
-        # Calculate split indices
+        # Calculate split indices ensuring every split gets at least 1 when n >= 3
         n_train = max(1, int(n * train_ratio))
         n_val = max(1, int(n * val_ratio))
-        # Test gets the remainder to ensure exact ratios
-        n_test = n - n_train - n_val
+        n_test = max(1, n - n_train - n_val)
 
-        # Ensure at least 1 sample per split if category is large enough
-        if n >= 10:
-            n_train = max(2, n_train)
-            n_val = max(1, n_val)
-            n_test = max(1, n_test)
-            # Recalculate if we exceeded total
-            while n_train + n_val + n_test > n:
-                if n_train > 2:
-                    n_train -= 1
-                elif n_val > 1:
-                    n_val -= 1
-                elif n_test > 1:
-                    n_test -= 1
-                else:
-                    break
+        # Redistribute from train if we exceeded total
+        while n_train + n_val + n_test > n:
+            if n_train > n_val and n_train > n_test and n_train > 1:
+                n_train -= 1
+            elif n_val > n_test and n_val > 1:
+                n_val -= 1
+            elif n_test > 1:
+                n_test -= 1
+            else:
+                break
 
         # Split
         train_seqs.extend(shuffled[:n_train])
@@ -170,7 +164,7 @@ def save_to_fasta(sequences: List[Dict], filepath: str):
 
 
 def split_dataset(
-    input_fasta: str = './data/qc_retained.fasta',
+    input_fasta: str = './data/ARG_DB.fasta',
     output_dir: str = './data',
     train_ratio: float = 0.8,
     val_ratio: float = 0.1,
@@ -277,7 +271,7 @@ def split_dataset(
 
 if __name__ == "__main__":
     split_dataset(
-        input_fasta='./data/qc_retained.fasta',
+        input_fasta='./data/ARG_DB.fasta',
         output_dir='./data',
         train_ratio=0.8,
         val_ratio=0.1,

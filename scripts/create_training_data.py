@@ -8,6 +8,7 @@ Data Leakage Prevention:
 - This ensures no high-similarity sequences between train and test sets
 """
 
+import argparse
 import os
 import re
 import json
@@ -127,12 +128,12 @@ def run_cd_hit_clustering(
             if line.startswith('>Cluster'):
                 current_cluster = int(line.split()[1])
             elif line and current_cluster is not None:
-                # Extract sequence ID from line like:
-                # 0\t147aa, >sp|Q9RYX6|... *\n or
-                # 1\t302aa, >sp|P0A5D1|... at 1:302:1:302/+/62.58%
+                # Extract integer UID from line like:
+                # 0\t147aa, >0 *\n or
+                # 1\t302aa, >1 at 1:302:1:302/+/62.58%
                 parts = line.split('>')
                 if len(parts) >= 2:
-                    seq_id = parts[1].split()[0].split('|')[0]  # Get ID before any spaces or pipes
+                    seq_id = int(parts[1].split()[0].rstrip('.'))
                     seq_to_cluster[seq_id] = current_cluster
 
     logger.info(f"CD-HIT clustering complete: {len(set(seq_to_cluster.values()))} clusters")
@@ -174,7 +175,11 @@ def stratified_split_with_clustering(
     # Group sequences by cluster
     cluster_to_seqs = defaultdict(list)
     for seq in sequences:
-        cluster_id = cluster_mapping.get(seq['id'], -1)  # -1 for unclustered
+        uid = seq['_uid']
+        if uid not in cluster_mapping:
+            raise KeyError(f"Sequence _uid {uid} not found in cluster mapping. "
+                           f"Ensure clustering was run on the same sequence set.")
+        cluster_id = cluster_mapping[uid]
         cluster_to_seqs[cluster_id].append(seq)
 
     logger.info(f"Total clusters: {len(cluster_to_seqs)}")
@@ -205,16 +210,21 @@ def stratified_split_with_clustering(
         shuffled = clusters.copy()
         random.shuffle(shuffled)
 
-        # Calculate split sizes
-        n_train = int(n * train_ratio)
-        n_val = int(n * val_ratio)
-        n_test = n - n_train - n_val
+        # Calculate split sizes ensuring every split gets at least 1 when n >= 3
+        n_train = max(1, int(n * train_ratio))
+        n_val = max(1, int(n * val_ratio))
+        n_test = max(1, n - n_train - n_val)
 
-        # Ensure at least 1 cluster per split if group is large enough
-        if n >= 10:
-            n_val = max(1, n_val)
-            n_test = max(1, n_test)
-            n_train = n - n_val - n_test
+        # Redistribute from train if we exceeded total
+        while n_train + n_val + n_test > n:
+            if n_train > n_val and n_train > n_test and n_train > 1:
+                n_train -= 1
+            elif n_val > n_test and n_val > 1:
+                n_val -= 1
+            elif n_test > 1:
+                n_test -= 1
+            else:
+                break
 
         # Split
         train_clusters.extend(shuffled[:n_train])
@@ -347,9 +357,9 @@ def save_to_fasta(sequences: List[Dict], filepath: str):
 
 
 def main(
-    positive_fasta: str = './data_now/qc_retained.fasta',
-    negative_fasta: str = './data_now/negative_samples_for_training.fasta',
-    output_dir: str = './data_now',
+    positive_fasta: str = './data/ARG_DB.fasta',
+    negative_fasta: str = './data/negative_samples_for_training.fasta',
+    output_dir: str = './data',
     train_ratio: float = 0.8,
     val_ratio: float = 0.1,
     test_ratio: float = 0.1,
@@ -399,9 +409,11 @@ def main(
     negative_seqs = parse_fasta_with_metadata(negative_fasta, is_arg=0, default_category='non_arg')
     logger.info(f"Loaded {len(negative_seqs)} non-ARG sequences")
 
-    # Step 3: Merge all sequences
+    # Step 3: Merge all sequences and assign integer UIDs
     logger.info(f"\nStep 3: Merging datasets")
     all_sequences = positive_seqs + negative_seqs
+    for idx, seq in enumerate(all_sequences):
+        seq['_uid'] = idx
     logger.info(f"Total sequences: {len(all_sequences)}")
     logger.info(f"  ARG: {len(positive_seqs)} ({len(positive_seqs)/len(all_sequences)*100:.1f}%)")
     logger.info(f"  non-ARG: {len(negative_seqs)} ({len(negative_seqs)/len(all_sequences)*100:.1f}%)")
@@ -410,9 +422,13 @@ def main(
     logger.info(f"\nStep 4: Stratified split ({train_ratio:.0%}:{val_ratio:.0%}:{test_ratio:.0%})")
 
     if use_clustering:
-        # Save merged sequences to temp file for clustering
+        # Save merged sequences to temp file for clustering with integer-only headers
         temp_merged = os.path.join(output_dir, 'temp_merged_for_clustering.fasta')
-        save_to_fasta(all_sequences, temp_merged)
+        with open(temp_merged, 'w') as f:
+            for seq in all_sequences:
+                f.write(f">{seq['_uid']}\n")
+                for i in range(0, len(seq['sequence']), 60):
+                    f.write(seq['sequence'][i:i+60] + '\n')
 
         # Run CD-HIT clustering
         logger.info(f"\nRunning CD-HIT clustering (identity: {cluster_identity:.0%})...")
@@ -531,14 +547,26 @@ def main(
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Create unified training dataset")
+    parser.add_argument("--positive-fasta", type=str, default="/home/mayue/ARGMind/data/ARG_DB.fasta")
+    parser.add_argument("--negative-fasta", type=str, default="./data/negative_samples_for_training.fasta")
+    parser.add_argument("--output-dir", type=str, default="./data")
+    parser.add_argument("--train-ratio", type=float, default=0.8)
+    parser.add_argument("--val-ratio", type=float, default=0.1)
+    parser.add_argument("--test-ratio", type=float, default=0.1)
+    parser.add_argument("--use-clustering", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--cluster-identity", type=float, default=0.5)
+    parser.add_argument("--seed", type=int, default=42)
+    args = parser.parse_args()
+
     main(
-        positive_fasta='./data_now/qc_retained.fasta',
-        negative_fasta='./data_now/negative_samples_for_training.fasta',
-        output_dir='./data_now',
-        train_ratio=0.8,
-        val_ratio=0.1,
-        test_ratio=0.1,
-        use_clustering=True,  # Enable data leakage prevention
-        cluster_identity=0.9,  # 90% sequence identity - only true duplicates cluster together
-        seed=42
+        positive_fasta=args.positive_fasta,
+        negative_fasta=args.negative_fasta,
+        output_dir=args.output_dir,
+        train_ratio=args.train_ratio,
+        val_ratio=args.val_ratio,
+        test_ratio=args.test_ratio,
+        use_clustering=args.use_clustering,
+        cluster_identity=args.cluster_identity,
+        seed=args.seed,
     )

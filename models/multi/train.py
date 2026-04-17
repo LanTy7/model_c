@@ -2,12 +2,10 @@
 """Training script for multi-class ARG classification."""
 import os
 import sys
-import logging
 import argparse
 from pathlib import Path
 from collections import Counter
 
-import yaml
 import numpy as np
 import pandas as pd
 import torch
@@ -19,37 +17,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from models.multi.model import MultiClassARGClassifier, FocalLoss
 from models.common.trainer import Trainer, TrainConfig, get_cosine_schedule_with_warmup
 from data.dataset import MultiClassARGDataset
+from utils.common import setup_logging, set_seed, load_config
 from utils.sequence_utils import compute_class_weights, get_max_length, BalancedClassSampler
-
-
-def setup_logging(log_dir: str, log_file: str = "train.log"):
-    """Setup logging."""
-    os.makedirs(log_dir, exist_ok=True)
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.FileHandler(os.path.join(log_dir, log_file)),
-            logging.StreamHandler()
-        ]
-    )
-    return logging.getLogger(__name__)
-
-
-def set_seed(seed: int = 42):
-    """Set random seed for reproducibility."""
-    import random
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-
-
-def load_config(config_path: str) -> dict:
-    """Load YAML configuration."""
-    with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
 
 
 def load_and_preprocess_data(csv_file: str, min_samples: int, logger):
@@ -148,6 +117,7 @@ def create_dataloaders(config: dict, logger):
             batch_size=config['training']['batch_size'],
             sampler=sampler,
             num_workers=config['training']['num_workers'],
+            persistent_workers=config['training']['num_workers'] > 0,
             pin_memory=True
         )
     else:
@@ -156,6 +126,7 @@ def create_dataloaders(config: dict, logger):
             batch_size=config['training']['batch_size'],
             shuffle=True,
             num_workers=config['training']['num_workers'],
+            persistent_workers=config['training']['num_workers'] > 0,
             pin_memory=True
         )
 
@@ -164,6 +135,7 @@ def create_dataloaders(config: dict, logger):
         batch_size=config['training']['batch_size'],
         shuffle=False,
         num_workers=config['training']['num_workers'],
+        persistent_workers=config['training']['num_workers'] > 0,
         pin_memory=True
     )
 
@@ -312,6 +284,7 @@ def main(config_path: str):
             batch_size=config['training']['batch_size'],
             shuffle=False,
             num_workers=config['training']['num_workers'],
+            persistent_workers=config['training']['num_workers'] > 0,
             pin_memory=True
         )
 

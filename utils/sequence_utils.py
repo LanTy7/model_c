@@ -15,8 +15,9 @@ AA_DICT.update({
 })
 
 # For embedding-based encoding (binary model)
+# PAD=0, 20 AAs=1-20, X=21, B=22, Z=23, J=24  => vocab_size=25
 AA_DICT_EMBED = {aa: i + 1 for i, aa in enumerate(AMINO_ACIDS)}
-AA_DICT_EMBED.update({'X': 21, 'PAD': 0})
+AA_DICT_EMBED.update({'X': 21, 'B': 22, 'Z': 23, 'J': 24, 'PAD': 0})
 
 
 def one_hot_encode(sequence: str, max_length: int) -> np.ndarray:
@@ -31,6 +32,9 @@ def one_hot_encode(sequence: str, max_length: int) -> np.ndarray:
         One-hot encoded array of shape (max_length, 21)
         Last dimension: 20 amino acids + PAD channel
     """
+    if len(sequence) == 0:
+        raise ValueError("Cannot encode an empty sequence.")
+
     encoding = np.zeros((max_length, 21), dtype=np.float32)
 
     for i in range(min(len(sequence), max_length)):
@@ -65,6 +69,9 @@ def sequence_to_indices(sequence: str, max_length: int) -> np.ndarray:
     Returns:
         Array of indices of shape (max_length,)
     """
+    if len(sequence) == 0:
+        raise ValueError("Cannot encode an empty sequence.")
+
     indices = [AA_DICT_EMBED.get(aa.upper(), 21) for aa in sequence]
     indices = indices[:max_length]  # Truncate
 

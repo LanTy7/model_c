@@ -19,7 +19,7 @@ from utils.sequence_utils import one_hot_encode
 
 def load_model(checkpoint_path: str, metadata_path: str = None, device: str = 'cuda'):
     """Load trained model from checkpoint."""
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
 
     # Load metadata if available
     if metadata_path and os.path.exists(metadata_path):
@@ -52,7 +52,7 @@ def load_model(checkpoint_path: str, metadata_path: str = None, device: str = 'c
             'input_size': input_size,
             'hidden_size': hidden_size,
             'num_layers': num_layers,
-            'dropout': 0.3,
+            'dropout': 0.4,
             'num_classes': len(class_names)
         }
 
@@ -134,8 +134,9 @@ def main():
 
     # Print distribution
     print("\nPredicted class distribution:")
-    for class_name in class_names:
-        count = sum(1 for p in preds if class_names[p] == class_name)
+    counts = np.bincount(preds, minlength=len(class_names))
+    for i, class_name in enumerate(class_names):
+        count = counts[i]
         print(f"  {class_name}: {count} ({count/len(preds)*100:.2f}%)")
 
 
