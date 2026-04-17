@@ -453,7 +453,6 @@ def main(
         min_clusters_needed = int(10 / min(train_ratio, val_ratio, test_ratio))  # At least 10 per split
 
         # Compute cluster size distribution
-        from collections import Counter
         cluster_size_counts = Counter(cluster_ids)
         sizes = list(cluster_size_counts.values())
         largest = max(sizes)
