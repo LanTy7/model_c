@@ -53,12 +53,14 @@ class BiLSTMAttentionBackbone(nn.Module):
         self.output_size = hidden_size * self.num_directions
 
         # Self-attention layer (enabled by default)
-        from .attention import SelfAttention
-        self.attention = SelfAttention(
-            hidden_dim=self.output_size,
-            num_heads=num_attention_heads,
-            dropout=attention_dropout
-        )
+        self.attention = None
+        if self.use_attention:
+            from .attention import SelfAttention
+            self.attention = SelfAttention(
+                hidden_dim=self.output_size,
+                num_heads=num_attention_heads,
+                dropout=attention_dropout
+            )
 
     def forward(
         self,
@@ -181,7 +183,7 @@ class GlobalPooling(nn.Module):
 
             if self.pooling_type == 'max':
                 # Set masked positions to very negative value (FP16 compatible)
-                x_masked = x.masked_fill(mask == 0, -1e4)
+                x_masked = x.masked_fill(~mask.bool(), -1e4)
                 return torch.max(x_masked, dim=1)[0]
             elif self.pooling_type == 'mean':
                 sum_pool = (x * mask).sum(dim=1)
@@ -189,7 +191,7 @@ class GlobalPooling(nn.Module):
                 return sum_pool / denom
             else:  # both
                 # Max pooling with mask
-                x_masked = x.masked_fill(mask == 0, -1e4)
+                x_masked = x.masked_fill(~mask.bool(), -1e4)
                 max_pool = torch.max(x_masked, dim=1)[0]
 
                 # Mean pooling with mask

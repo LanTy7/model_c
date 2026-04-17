@@ -28,12 +28,10 @@ def load_model(checkpoint_path: str, metadata_path: str = None, device: str = 'c
         class_names = metadata['class_names']
         max_length = metadata['max_length']
     else:
-        # Try to get from checkpoint
-        if 'class_names' in checkpoint:
-            class_names = checkpoint['class_names']
-            max_length = checkpoint['max_length']
-        else:
-            raise ValueError("Metadata not found. Please provide metadata.json path.")
+        raise ValueError(
+            "Metadata not found. Please provide metadata.json path "
+            "(or ensure it exists in the same directory as the checkpoint)."
+        )
 
     # Get model config
     if 'model_config' in checkpoint:

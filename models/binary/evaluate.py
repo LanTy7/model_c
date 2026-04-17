@@ -267,7 +267,7 @@ def main():
                 outputs = model(inputs)
                 probs = torch.sigmoid(outputs).cpu().numpy()
                 all_probs.append(probs.flatten())
-                all_targets.extend(targets.numpy().flatten())
+                all_targets.extend(targets.cpu().numpy().flatten())
 
         y_true_tune = np.array(all_targets)
         y_prob_tune = np.concatenate(all_probs)

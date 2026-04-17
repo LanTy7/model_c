@@ -140,8 +140,6 @@ class AttentionPooling(nn.Module):
     def __init__(self, hidden_dim: int, num_heads: int = 4):
         super().__init__()
         self.self_attn = SelfAttention(hidden_dim, num_heads)
-        # Learnable query vector for pooling
-        self.pool_query = nn.Parameter(torch.randn(1, 1, hidden_dim))
 
     def forward(
         self,

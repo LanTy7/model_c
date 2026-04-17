@@ -80,8 +80,8 @@ class AECRLoss(nn.Module):
         diff = ii - jj
         kernel = torch.exp(-(diff ** 2) / (2 * self.sigma ** 2))
 
-        # Normalize to sum to 1
-        kernel = kernel / kernel.sum()
+        # Normalize per-row so each row sums to 1 (matching attention's row-wise softmax)
+        kernel = kernel / kernel.sum(dim=1, keepdim=True)
 
         # Cache for future use
         self._gaussian_kernels[seq_len] = kernel

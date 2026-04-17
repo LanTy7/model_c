@@ -194,7 +194,13 @@ class FocalLoss(nn.Module):
             label_smoothing=self.label_smoothing
         )
 
-        pt = torch.exp(-ce_loss)
+        # When label_smoothing > 0, ce_loss is no longer -log(pt), so
+        # pt cannot be derived from ce_loss. Compute pt directly instead.
+        if self.label_smoothing > 0:
+            probs = torch.softmax(inputs, dim=1)
+            pt = probs.gather(1, targets.unsqueeze(1)).squeeze(1)
+        else:
+            pt = torch.exp(-ce_loss)
         focal_loss = ((1 - pt) ** self.gamma) * ce_loss
 
         if self.reduction == 'mean':

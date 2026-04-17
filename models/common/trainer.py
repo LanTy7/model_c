@@ -269,6 +269,28 @@ class Trainer:
                 total_aecr_loss += aecr_loss.item()
             num_batches += 1
 
+        # Apply any remaining accumulated gradients at end of epoch
+        remaining = num_batches % self.config.accumulation_steps
+        if remaining != 0:
+            if self.config.grad_clip > 0:
+                if self.config.use_amp:
+                    self.scaler.unscale_(self.optimizer)
+                torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(),
+                    self.config.grad_clip
+                )
+
+            if self.config.use_amp:
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+            else:
+                self.optimizer.step()
+
+            self.optimizer.zero_grad()
+
+            if self.scheduler:
+                self.scheduler.step()
+
         avg_loss = total_loss / num_batches
 
         # Check for NaN/Inf in training loss

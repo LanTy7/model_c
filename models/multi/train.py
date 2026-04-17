@@ -106,7 +106,7 @@ def create_dataloaders(config: dict, logger):
     val_dataset = MultiClassARGDataset(val_seqs, val_labels, max_length)
 
     # Create dataloaders with balanced sampler for training
-    use_balanced_sampling = config['training'].get('use_balanced_sampling', True)
+    use_balanced_sampling = config['training'].get('use_balanced_sampling', False)
     if use_balanced_sampling:
         logger.info("Using balanced class sampling for training")
         # Compute samples per class (median of class counts to avoid over-sampling too much)
@@ -249,6 +249,22 @@ def main(config_path: str):
         model_config=model_config
     )
 
+    # Save metadata before training starts so it exists even if training is interrupted
+    import json
+    metadata = {
+        'class_names': class_names,
+        'label_to_idx': label_to_idx,
+        'max_length': int(max_length),
+        'num_classes': num_classes,
+        'class_counts': class_counts.tolist(),
+        'config': config
+    }
+    metadata_path = os.path.join(config['paths']['save_dir'], 'metadata.json')
+    os.makedirs(config['paths']['save_dir'], exist_ok=True)
+    with open(metadata_path, 'w') as f:
+        json.dump(metadata, f, indent=2)
+    logger.info(f"Initial metadata saved to: {metadata_path}")
+
     # Train
     history = trainer.train(train_loader, val_loader, save_name='multi_best.pth')
 
@@ -294,21 +310,11 @@ def main(config_path: str):
         from utils.metrics import format_metrics_for_display
         logger.info("\n" + format_metrics_for_display(test_metrics))
 
-    # Save additional metadata
-    import json
-    metadata = {
-        'class_names': class_names,
-        'label_to_idx': label_to_idx,
-        'max_length': int(max_length),
-        'num_classes': num_classes,
-        'class_counts': class_counts.tolist(),
-        'best_metric': float(trainer.best_metric),
-        'config': config
-    }
-    metadata_path = os.path.join(config['paths']['save_dir'], 'metadata.json')
+    # Update metadata with best metric after training completes
+    metadata['best_metric'] = float(trainer.best_metric)
     with open(metadata_path, 'w') as f:
         json.dump(metadata, f, indent=2)
-    logger.info(f"Metadata saved to: {metadata_path}")
+    logger.info(f"Metadata updated with best_metric at: {metadata_path}")
 
 
 if __name__ == "__main__":
