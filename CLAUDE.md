@@ -63,7 +63,6 @@ python models/multi/predict.py \
 - **AMP**: Uses `torch.cuda.amp` (deprecated warnings are OK)
 - **Enhanced Features**: Self-Attention, Multi-scale CNN, AECR regularization available via enhanced configs
 - **Threshold Tuning**: Use `--tune-threshold` in evaluate.py for imbalanced data scenarios
-- **Data Preparation**: Use `scripts/quality_control.py` and `scripts/download_negative_samples.py` for data prep
 
 ## Documentation Files
 

@@ -6,7 +6,7 @@ This repository contains deep learning models for **Antibiotic Resistance Gene (
 
 Models use **BiLSTM + Self-Attention + Multi-scale CNN** architecture with modular design for maintainability and extensibility.
 
-## Recent Improvements (2025-04)
+## Recent Improvements 
 
 ### 1. Enhanced Architecture (Inspired by MCT-ARG)
 - **Self-Attention Mechanism**: Added multi-head attention after BiLSTM for better focus on important sequence positions
@@ -58,7 +58,7 @@ models/                       # Modular model implementations
     train.py                # Training script
     predict.py              # Inference script
 
-data_now/                        # Dataset storage
+data/                        # Dataset storage
   train.csv                 # Training data (sequence + labels)
   val.csv                   # Validation data
   test.csv                  # Test data

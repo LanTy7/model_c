@@ -130,10 +130,12 @@ class BinaryARGClassifier(nn.Module):
 
         # BiLSTM (+ Attention if enabled)
         if self.use_attention:
-            lstm_out = self.backbone(features, mask, return_attention=False)
-            # Apply attention separately to get weights
+            backbone_out = self.backbone(features, mask, return_attention=return_attention)
             if return_attention:
-                _, attention_weights = self.backbone.attention(lstm_out, mask)
+                lstm_out, attention_weights = backbone_out
+            else:
+                lstm_out = backbone_out
+                attention_weights = None
         else:
             lstm_out = self.backbone(features, mask)
             attention_weights = None

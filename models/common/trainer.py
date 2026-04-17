@@ -268,6 +268,11 @@ class Trainer:
 
         avg_loss = total_loss / num_batches
 
+        # Check for NaN/Inf in training loss
+        if not np.isfinite(avg_loss):
+            self.logger.error(f"Non-finite training loss detected: {avg_loss}. This may indicate numerical instability from pos_weight, AMP, or AECR.")
+            # Optionally could raise RuntimeError here; for now we warn strongly.
+
         # Log loss components if AECR is used
         if self.aecr_criterion is not None:
             avg_task_loss = total_task_loss / num_batches
@@ -396,7 +401,28 @@ class Trainer:
 
             # Get current metric for early stopping
             if self.metric_fn:
-                current_metric = val_metrics.get('f1', val_metrics['accuracy'])
+                # Collect validation predictions for custom metric_fn
+                # Re-run validation to collect raw targets/preds/probs (lightweight)
+                self.model.eval()
+                all_val_targets = []
+                all_val_preds = []
+                all_val_probs = []
+                with torch.no_grad():
+                    for inputs, targets in val_loader:
+                        inputs = inputs.to(self.config.device)
+                        outputs = self.model(inputs)
+                        is_binary = outputs.dim() == 2 and outputs.shape[1] == 1 and targets.dim() == 1
+                        if is_binary:
+                            probs = torch.sigmoid(outputs).cpu().numpy()
+                            preds = (probs > 0.5).astype(int)
+                        else:
+                            probs = torch.softmax(outputs, dim=1).cpu().numpy()
+                            preds = np.argmax(probs, axis=1)
+                        all_val_targets.extend(targets.numpy().flatten())
+                        all_val_preds.extend(preds.flatten())
+                        all_val_probs.append(probs.flatten() if is_binary else probs)
+                all_val_probs = np.concatenate(all_val_probs, axis=0)
+                current_metric = self.metric_fn(np.array(all_val_targets), np.array(all_val_preds), all_val_probs)
             else:
                 current_metric = -val_loss  # Minimize loss
 

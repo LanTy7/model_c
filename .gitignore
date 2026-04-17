@@ -7,11 +7,11 @@ __pycache__/
 # Docs
 # README.md
 # workflow_orchestration.md
-# tasks/
+tasks/
 
 # Model-related
 checkpoints/
-data_now/
+data/
 data_previous/
 analysis_previous/
 figures/

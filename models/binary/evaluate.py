@@ -262,7 +262,7 @@ def main():
     model, checkpoint = load_model(args.checkpoint, config, device)
     logger.info(f"Model loaded from epoch {checkpoint.get('epoch', 'unknown')}")
 
-    # Load test data
+    # Load data
     logger.info("Loading test data...")
     test_seqs, test_labels = load_data(config['data']['test_csv'], logger)
 
@@ -276,17 +276,30 @@ def main():
         pin_memory=True
     )
 
-    # Threshold tuning (if requested)
+    # Threshold tuning (if requested) — tune on validation set to avoid data leakage
     eval_threshold = args.threshold
     if args.tune_threshold:
         logger.info("=" * 60)
-        logger.info(f"Tuning threshold on test set (optimizing {args.tune_metric})...")
+        if 'val_csv' not in config['data'] or not os.path.exists(config['data']['val_csv']):
+            logger.error("Validation data required for threshold tuning. Provide val_csv in config.")
+            return
 
-        # Collect all probabilities first
+        logger.info(f"Tuning threshold on validation set (optimizing {args.tune_metric})...")
+        val_seqs, val_labels = load_data(config['data']['val_csv'], logger)
+        val_dataset = BinarySequenceDataset(val_seqs, val_labels, max_length)
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=config['training']['batch_size'],
+            shuffle=False,
+            num_workers=config['training']['num_workers'],
+            pin_memory=True
+        )
+
+        # Collect all probabilities on validation set
         all_probs = []
         all_targets = []
         with torch.no_grad():
-            for inputs, targets in test_loader:
+            for inputs, targets in val_loader:
                 inputs = inputs.to(device)
                 outputs = model(inputs)
                 probs = torch.sigmoid(outputs).cpu().numpy()
@@ -341,7 +354,7 @@ def main():
         threshold_path,
         optimal_threshold=eval_threshold,
         tune_metric=args.tune_metric if args.tune_threshold else "manual",
-        description=f"Threshold {'optimized for ' + args.tune_metric.upper() + ' score' if args.tune_threshold else 'set manually'} on test set"
+        description=f"Threshold {'optimized for ' + args.tune_metric.upper() + ' score on validation set' if args.tune_threshold else 'set manually'}"
     )
     logger.info(f"Threshold saved to: {threshold_path}")
 

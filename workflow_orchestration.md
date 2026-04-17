@@ -37,21 +37,14 @@
 - Fix failing CI tests proactively.
 
 ## Task Management
-1. **Plan First**: Write the plan to tasks/todo.md with checkable items.
+1. **Plan First**: Write the plan with checkable items.
 2. **Verify Plan**: Review before starting implementation.
 3. **Track Progress**: Mark items complete as you go.
 4. **Explain Changes**: Provide a high-level summary at each step.
-5. **Document Results**: Update tasks/todo.md when completing work:
-   - Mark completed items with `[x]`
-   - Record key results and metrics
-   - Move major completed tasks to "Completed Tasks" section
-   - Add a review section summarizing the work done
-6. **Sync Project Docs**: When code changes affect documented features, update relevant documentation:
+5. **Sync Project Docs**: When code changes affect documented features, update relevant documentation:
    - `README.md`: Repository structure, commands, configuration guide, troubleshooting
    - `CLAUDE.md`: Quick reference, key reminders (if workflow or critical rules change)
-7. **Capture Lessons**: Update tasks/lessons.md after corrections.
 
 ## Core Principles
-1. **Simplicity First**: Make every change as simple as possible. Minimize code impact.
-2. **No Laziness**: Identify root causes. Avoid temporary fixes. Apply senior developer standards.
-3. **Minimal Impact**: Touch only what is necessary. Avoid introducing new bugs.
+1. **No Laziness**: Identify root causes. Avoid temporary fixes. Apply senior developer standards.
+2. **Minimal Impact**: Touch only what is necessary. Avoid introducing new bugs.
