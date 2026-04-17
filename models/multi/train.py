@@ -181,11 +181,7 @@ def main(config_path: str):
 
     # Setup
     set_seed(config.get('seed', 42))
-    # Support both old and new config formats
-    if 'paths' in config:
-        log_dir = config['paths']['log_dir']
-    else:
-        log_dir = config['training'].get('log_dir', './logs/multi')
+    log_dir = config['paths']['log_dir']
     logger = setup_logging(log_dir)
     device = config.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -214,6 +210,7 @@ def main(config_path: str):
     model_config['num_classes'] = num_classes
     model = MultiClassARGClassifier(**model_config)
     logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+    logger.info("Using default enhanced architecture (CNN + Attention)")
 
     # Loss function
     criterion = FocalLoss(
@@ -236,16 +233,9 @@ def main(config_path: str):
 
     # Training config
     training_config = config['training']
-
-    # Support both old (with paths) and new config formats
-    if 'paths' in config:
-        save_dir = config['paths']['save_dir']
-        fig_dir = config['paths'].get('fig_dir')
-        log_dir = config['paths']['log_dir']
-    else:
-        save_dir = training_config.get('save_dir', './checkpoints/multi')
-        fig_dir = training_config.get('fig_dir', './figures/multi')
-        log_dir = training_config.get('log_dir', './logs/multi')
+    save_dir = config['paths']['save_dir']
+    fig_dir = config['paths'].get('fig_dir')
+    log_dir = config['paths']['log_dir']
 
     train_config = TrainConfig(
         epochs=training_config['epochs'],
@@ -262,8 +252,8 @@ def main(config_path: str):
         num_workers=training_config.get('num_workers', 4),
         fig_dir=fig_dir,
         class_names=class_names,
-        # AECR parameters
-        use_aecr=training_config.get('use_aecr', False),
+        # AECR parameters (enabled by default)
+        use_aecr=True,
         lambda_aecr=training_config.get('lambda_aecr', 0.1),
         aecr_sigma=training_config.get('aecr_sigma', 3.0),
         aecr_lambda_ent=training_config.get('aecr_lambda_ent', 1.0),
@@ -283,7 +273,8 @@ def main(config_path: str):
         optimizer=optimizer,
         scheduler=scheduler,
         metric_fn=val_metric_fn,
-        logger=logger
+        logger=logger,
+        model_config=model_config
     )
 
     # Train

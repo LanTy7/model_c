@@ -33,8 +33,8 @@ class TrainConfig:
     num_workers: int = 4
     fig_dir: Optional[str] = None  # Directory for saving figures
     class_names: Optional[List[str]] = None  # Class names for visualization
-    # AECR loss configuration
-    use_aecr: bool = False  # Whether to use AECR attention regularization
+    # AECR loss configuration (enabled by default)
+    use_aecr: bool = True  # Whether to use AECR attention regularization
     lambda_aecr: float = 0.1  # Weight for AECR loss
     aecr_sigma: float = 3.0  # Gaussian kernel sigma for AECR
     aecr_lambda_ent: float = 1.0  # Entropy loss weight
@@ -93,7 +93,8 @@ class Trainer:
         optimizer: Optional[torch.optim.Optimizer] = None,
         scheduler: Optional[Any] = None,
         metric_fn: Optional[Callable] = None,
-        logger: Optional[logging.Logger] = None
+        logger: Optional[logging.Logger] = None,
+        model_config: Optional[dict] = None
     ):
         """
         Args:
@@ -104,6 +105,7 @@ class Trainer:
             scheduler: Learning rate scheduler
             metric_fn: Function to compute validation metric
             logger: Logger instance
+            model_config: Model architecture config to persist in checkpoint
         """
         self.model = model.to(config.device)
         self.config = config
@@ -111,6 +113,7 @@ class Trainer:
         self.scheduler = scheduler
         self.metric_fn = metric_fn
         self.logger = logger or logging.getLogger(__name__)
+        self.model_config = model_config
 
         # Setup optimizer
         if optimizer is None:
@@ -576,7 +579,8 @@ class Trainer:
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'metrics': metrics,
-            'config': self.config
+            'config': self.config,
+            'model_config': self.model_config
         }
         torch.save(checkpoint, path)
 

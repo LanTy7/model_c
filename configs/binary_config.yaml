@@ -1,4 +1,5 @@
 # Binary Classification Configuration
+# Default config includes Self-Attention, Multi-scale CNN, and AECR regularization
 
 model:
   name: "BinaryARGClassifier"
@@ -6,15 +7,19 @@ model:
   embedding_dim: 128
   hidden_size: 128
   num_layers: 2
-  dropout: 0.5            
+  dropout: 0.4
   max_length: 1000
+  num_attention_heads: 4
+  attention_dropout: 0.1
+  cnn_out_channels: 64
+  cnn_kernel_sizes: [3, 5, 7]
 
 training:
   epochs: 100
   batch_size: 256
-  lr: 0.0003              
-  weight_decay: 0.02      
-  patience: 10           
+  lr: 0.0005
+  weight_decay: 0.02
+  patience: 15
   grad_clip: 1.0
   warmup_epochs: 5
   use_amp: true
@@ -23,13 +28,18 @@ training:
 
   # Class imbalance handling
   # pos_weight: null means auto-calculate from data (n_neg / n_pos)
-  # Set to a value > 1 to emphasize positive class (e.g., 10.0 for 10:1 emphasis)
-  pos_weight: null        # Options: null (auto), or float value (e.g., 10.0)
+  pos_weight: null
+
+  # AECR regularization (enabled by default)
+  lambda_aecr: 0.1
+  aecr_sigma: 3.0
+  aecr_lambda_ent: 1.0
+  aecr_lambda_loc: 0.5
 
 data:
-  train_csv: "data_now/train.csv"
-  val_csv: "data_now/val.csv"
-  test_csv: "data_now/test.csv"
+  train_csv: "data/train.csv"
+  val_csv: "data/val.csv"
+  test_csv: "data/test.csv"
   pos_neg_ratio: 1
 
 paths:

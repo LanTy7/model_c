@@ -4,12 +4,12 @@ This repository contains deep learning models for **Antibiotic Resistance Gene (
 - **Binary classification**: Identify if a protein sequence is an ARG
 - **Multi-class classification**: Classify ARGs into antibiotic resistance categories
 
-Models use **BiLSTM + Self-Attention + Multi-scale CNN** architecture with modular design for maintainability and extensibility.
+Models use **BiLSTM + Self-Attention + Multi-scale CNN** architecture with modular design for maintainability and extensibility. These features are now enabled by default in all standard configs.
 
-## Recent Improvements 
+## Architecture Overview
 
-### 1. Enhanced Architecture (Inspired by MCT-ARG)
-- **Self-Attention Mechanism**: Added multi-head attention after BiLSTM for better focus on important sequence positions
+### 1. Core Components (Default)
+- **Self-Attention Mechanism**: Multi-head attention after BiLSTM for better focus on important sequence positions
 - **Multi-scale CNN**: Parallel convolutions with kernel sizes [3, 5, 7] to capture local motifs at different scales
 - **AECR Regularization**: Attention Entropy and Continuity Regularization for sharper, smoother attention patterns
 
@@ -35,25 +35,23 @@ Real-world ARG prevalence is ~0.1-1%, but training data is 1:1 balanced. We impl
 
 ```
 configs/                      # YAML configuration files
-  binary_config.yaml         # Binary classification config (baseline)
-  binary_config_enhanced.yaml  # Binary config with attention + CNN + AECR
-  multi_config.yaml          # Multi-class classification config (baseline)
-  multi_config_enhanced.yaml   # Multi-class config with attention + CNN + AECR
+  binary_config.yaml         # Binary classification config (with attention + CNN + AECR)
+  multi_config.yaml          # Multi-class classification config (with attention + CNN + AECR)
 
 models/                       # Modular model implementations
   common/                    # Shared components
-    bilstm.py               # BiLSTM backbone with optional attention
+    bilstm.py               # BiLSTM backbone with self-attention
     attention.py            # Multi-head self-attention module
     multiscale_cnn.py       # Multi-scale CNN for local feature extraction
     aecr_loss.py            # AECR regularization loss
     trainer.py              # Unified training framework (AMP, early stopping, AECR)
   binary/                    # Binary classification
-    model.py                # BinaryARGClassifier (supports attention, CNN)
+    model.py                # BinaryARGClassifier (CNN + Attention + AECR)
     train.py                # Training script (supports pos_weight)
     evaluate.py             # Evaluation script with threshold tuning
     predict.py              # Inference script
   multi/                     # Multi-class classification
-    model.py                # MultiClassARGClassifier + FocalLoss
+    model.py                # MultiClassARGClassifier + FocalLoss (CNN + Attention + AECR)
     train.py                # Training script
     predict.py              # Inference script
 
@@ -99,9 +97,11 @@ python models/multi/train.py --config configs/multi_config.yaml
 ```
 
 Key configuration in YAML files:
-- `model`: Architecture parameters (hidden_size, num_layers, dropout)
-- `training`: Hyperparameters (epochs, batch_size, lr, etc.)
+- `model`: Architecture parameters (hidden_size, num_layers, dropout, attention heads, CNN kernels)
+- `training`: Hyperparameters (epochs, batch_size, lr, etc.) including AECR regularization settings
 - `data`: Data paths and preprocessing settings
+
+Note: The default configs (`binary_config.yaml` and `multi_config.yaml`) already include Self-Attention, Multi-scale CNN, and AECR regularization.
 
 ### Inference
 
@@ -124,8 +124,9 @@ python models/multi/predict.py \
 ## Key Architecture Decisions
 
 ### Model Configuration
-- **Binary model**: Embedding (vocab_size=22) -> BiLSTM (hidden=128, 2 layers) -> FC
-- **Multi-class model**: One-hot (21 dims) -> BiLSTM (hidden=256, 3 layers) -> FC with Focal Loss
+- **Binary model**: Embedding (vocab_size=22) -> Multi-scale CNN -> BiLSTM + Self-Attention (hidden=128, 2 layers) -> FC
+- **Multi-class model**: One-hot (21 dims) -> Multi-scale CNN -> BiLSTM + Self-Attention (hidden=256, 3 layers) -> FC with Focal Loss
+- **AECR**: Attention Entropy and Continuity Regularization is applied during training by default
 
 ### Data Processing
 - Amino acid vocabulary: 20 standard + X (unknown) + PAD
@@ -154,14 +155,21 @@ model:
   embedding_dim: 128
   hidden_size: 128
   num_layers: 2
-  dropout: 0.3
+  dropout: 0.4
+  max_length: 1000
+  num_attention_heads: 4
+  attention_dropout: 0.1
+  cnn_out_channels: 64
+  cnn_kernel_sizes: [3, 5, 7]
 
 training:
   epochs: 100
   batch_size: 256
   lr: 0.0005
-  weight_decay: 0.01
+  weight_decay: 0.02
   patience: 15
+  lambda_aecr: 0.1
+  aecr_sigma: 3.0
 ```
 
 ### Multi-class Config Example
@@ -170,11 +178,19 @@ model:
   input_size: 21
   hidden_size: 256
   num_layers: 3
-  dropout: 0.3
+  dropout: 0.4
+  num_attention_heads: 8
+  attention_dropout: 0.1
+  cnn_out_channels: 64
+  cnn_kernel_sizes: [3, 5, 7]
 
 focal_loss:
   gamma: 1.0
   label_smoothing: 0.1
+
+training:
+  lambda_aecr: 0.1
+  aecr_sigma: 3.0
 
 data:
   min_samples: 40  # Merge rare categories
@@ -212,6 +228,7 @@ data:
 3. **Random Seeds**: Fixed seed (42) used for reproducibility in training scripts
 4. **Multi-class Labels**: Must handle "Others" category carefully; label mapping saved in metadata.json
 5. **Mixed Precision**: Uses `torch.cuda.amp` (deprecated warnings are OK)
+6. **Default Architecture**: Self-Attention, Multi-scale CNN, and AECR regularization are enabled by default in both binary and multi-class configs
 
 ## Documentation Files
 

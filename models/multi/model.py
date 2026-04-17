@@ -18,14 +18,14 @@ class MultiClassARGClassifier(nn.Module):
     def __init__(
         self,
         input_size: int = 21,  # 20 amino acids + PAD indicator
-        hidden_size: int = 128,
-        num_layers: int = 2,
+        hidden_size: int = 256,
+        num_layers: int = 3,
         dropout: float = 0.4,
         num_classes: int = 14,
-        use_attention: bool = False,
-        num_attention_heads: int = 4,
+        use_attention: bool = True,
+        num_attention_heads: int = 8,
         attention_dropout: float = 0.1,
-        use_cnn: bool = False,
+        use_cnn: bool = True,
         cnn_out_channels: int = 64,
         cnn_kernel_sizes: list = None
     ):
@@ -36,10 +36,10 @@ class MultiClassARGClassifier(nn.Module):
             num_layers: Number of LSTM layers
             dropout: Dropout probability
             num_classes: Number of ARG categories
-            use_attention: Whether to add self-attention layer after BiLSTM
-            num_attention_heads: Number of attention heads (if use_attention=True)
+            use_attention: Whether to add self-attention layer after BiLSTM (default: True)
+            num_attention_heads: Number of attention heads
             attention_dropout: Dropout for attention weights
-            use_cnn: Whether to use multi-scale CNN before BiLSTM
+            use_cnn: Whether to use multi-scale CNN before BiLSTM (default: True)
             cnn_out_channels: Output channels per CNN kernel size
             cnn_kernel_sizes: List of CNN kernel sizes (default: [3, 5, 7])
         """
@@ -47,40 +47,27 @@ class MultiClassARGClassifier(nn.Module):
         self.use_attention = use_attention
         self.use_cnn = use_cnn
 
-        # Multi-scale CNN (optional)
-        if use_cnn:
-            from models.common.multiscale_cnn import MultiScaleCNN
-            self.cnn = MultiScaleCNN(
-                input_dim=input_size,
-                out_channels=cnn_out_channels,
-                kernel_sizes=cnn_kernel_sizes,
-                dropout=dropout
-            )
-            lstm_input_size = self.cnn.output_dim
-        else:
-            self.cnn = None
-            lstm_input_size = input_size
+        # Multi-scale CNN
+        from models.common.multiscale_cnn import MultiScaleCNN
+        self.cnn = MultiScaleCNN(
+            input_dim=input_size,
+            out_channels=cnn_out_channels,
+            kernel_sizes=cnn_kernel_sizes,
+            dropout=dropout
+        )
+        lstm_input_size = self.cnn.output_dim
 
-        # Choose backbone with or without attention
-        if use_attention:
-            self.backbone = BiLSTMAttentionBackbone(
-                input_size=lstm_input_size,
-                hidden_size=hidden_size,
-                num_layers=num_layers,
-                dropout=dropout,
-                bidirectional=True,
-                use_attention=True,
-                num_attention_heads=num_attention_heads,
-                attention_dropout=attention_dropout
-            )
-        else:
-            self.backbone = BiLSTMBackbone(
-                input_size=lstm_input_size,
-                hidden_size=hidden_size,
-                num_layers=num_layers,
-                dropout=dropout,
-                bidirectional=True
-            )
+        # Backbone always uses attention by default
+        self.backbone = BiLSTMAttentionBackbone(
+            input_size=lstm_input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout,
+            bidirectional=True,
+            use_attention=use_attention,
+            num_attention_heads=num_attention_heads,
+            attention_dropout=attention_dropout
+        )
 
         self.pooling = GlobalPooling(pooling_type='both')
 
@@ -122,21 +109,15 @@ class MultiClassARGClassifier(nn.Module):
         # Create mask from PAD channel
         mask = self._create_mask(x)  # (batch, seq_len)
 
-        # Optional multi-scale CNN preprocessing
-        if self.use_cnn and self.cnn is not None:
-            features = self.cnn(x, mask)  # (batch, seq_len, cnn_output_dim)
-        else:
-            features = x  # (batch, seq_len, input_size)
+        # Multi-scale CNN preprocessing
+        features = self.cnn(x, mask)  # (batch, seq_len, cnn_output_dim)
 
-        # BiLSTM (+ Attention if enabled)
-        if self.use_attention:
-            lstm_out = self.backbone(features, mask, return_attention=False)
-            # Apply attention separately to get weights
-            if return_attention:
-                _, attention_weights = self.backbone.attention(lstm_out, mask)
-        else:
-            lstm_out = self.backbone(features, mask)
-            attention_weights = None
+        # BiLSTM + Attention
+        lstm_out = self.backbone(features, mask, return_attention=False)
+        # Apply attention separately to get weights
+        attention_weights = None
+        if return_attention:
+            _, attention_weights = self.backbone.attention(lstm_out, mask)
 
         # Masked global pooling
         features = self.pooling(lstm_out, mask)  # (batch, hidden*4)
@@ -164,16 +145,11 @@ class MultiClassARGClassifier(nn.Module):
         """Get sequence embeddings before classification."""
         mask = self._create_mask(x)
 
-        # Optional multi-scale CNN preprocessing
-        if self.use_cnn and self.cnn is not None:
-            features = self.cnn(x, mask)
-        else:
-            features = x
+        # Multi-scale CNN preprocessing
+        features = self.cnn(x, mask)
 
-        if self.use_attention:
-            lstm_out = self.backbone(features, mask, return_attention=False)
-        else:
-            lstm_out = self.backbone(features, mask)
+        # BiLSTM + Attention
+        lstm_out = self.backbone(features, mask, return_attention=False)
         return self.pooling(lstm_out, mask)
 
 

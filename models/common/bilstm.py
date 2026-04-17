@@ -30,7 +30,7 @@ class BiLSTMAttentionBackbone(nn.Module):
         num_layers: int = 2,
         dropout: float = 0.4,
         bidirectional: bool = True,
-        use_attention: bool = False,
+        use_attention: bool = True,
         num_attention_heads: int = 4,
         attention_dropout: float = 0.1
     ):
@@ -52,16 +52,13 @@ class BiLSTMAttentionBackbone(nn.Module):
 
         self.output_size = hidden_size * self.num_directions
 
-        # Optional self-attention layer
-        if use_attention:
-            from .attention import SelfAttention
-            self.attention = SelfAttention(
-                hidden_dim=self.output_size,
-                num_heads=num_attention_heads,
-                dropout=attention_dropout
-            )
-        else:
-            self.attention = None
+        # Self-attention layer (enabled by default)
+        from .attention import SelfAttention
+        self.attention = SelfAttention(
+            hidden_dim=self.output_size,
+            num_heads=num_attention_heads,
+            dropout=attention_dropout
+        )
 
     def forward(
         self,
@@ -88,9 +85,9 @@ class BiLSTMAttentionBackbone(nn.Module):
             mask_expanded = mask.unsqueeze(-1)  # (batch, seq_len, 1)
             output = output.masked_fill(~mask_expanded, 0.0)
 
-        # Apply self-attention if enabled
+        # Apply self-attention
         attention_weights = None
-        if self.use_attention and self.attention is not None:
+        if self.use_attention:
             output, attention_weights = self.attention(output, mask)
 
         if return_attention and attention_weights is not None:
@@ -130,7 +127,7 @@ class BiLSTMBackbone(nn.Module):
             num_layers=num_layers,
             dropout=dropout,
             bidirectional=bidirectional,
-            use_attention=False
+            use_attention=True
         )
         self.output_size = self.backbone.output_size
 

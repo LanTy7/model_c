@@ -1,36 +1,46 @@
 # Multi-class Classification Configuration
+# Default config includes Self-Attention, Multi-scale CNN, and AECR regularization
 
 model:
   name: "MultiClassARGClassifier"
   input_size: 21
   hidden_size: 256
   num_layers: 3
-  dropout: 0.5
+  dropout: 0.4
+  num_attention_heads: 8
+  attention_dropout: 0.1
+  cnn_out_channels: 64
+  cnn_kernel_sizes: [3, 5, 7]
 
 training:
   epochs: 150
   batch_size: 256
-  lr: 0.001               
-  weight_decay: 0.02     
+  lr: 0.001
+  weight_decay: 0.02
   patience: 20
   grad_clip: 1.0
   warmup_epochs: 5
   use_amp: true
   accumulation_steps: 1
   num_workers: 4
-  use_balanced_sampling: false  
+  use_balanced_sampling: false
 
-# Focal Loss parameters
+  # AECR regularization (enabled by default)
+  lambda_aecr: 0.1
+  aecr_sigma: 3.0
+  aecr_lambda_ent: 1.0
+  aecr_lambda_loc: 0.5
+
 focal_loss:
-  gamma: 1.0              
-  label_smoothing: 0.05   
-  class_weight_method: "sqrt"    
-  class_weight_clip: [0.5, 3.0]  
+  gamma: 1.0
+  label_smoothing: 0.1
+  class_weight_method: "sqrt"
+  class_weight_clip: [0.5, 3.0]
 
 data:
-  train_csv: "data_now/train.csv"
-  val_csv: "data_now/val.csv"
-  test_csv: "data_now/test.csv"
+  train_csv: "data/train.csv"
+  val_csv: "data/val.csv"
+  test_csv: "data/test.csv"
   min_samples: 40
   max_length_percentile: 95
 
