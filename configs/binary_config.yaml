@@ -16,14 +16,14 @@ model:
 
 training:
   epochs: 100
-  batch_size: 512
+  batch_size: 256
   lr: 0.002
   weight_decay: 0.02
   patience: 15
   grad_clip: 1.0
   warmup_epochs: 3
   use_amp: true
-  accumulation_steps: 1
+  accumulation_steps: 2
   num_workers: 8
 
   # Class imbalance handling
