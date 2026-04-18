@@ -239,7 +239,7 @@ class CNN_BiLSTM_Backbone(nn.Module):
         if self.use_attention and self.attention is not None:
             lstm_out, attention_weights = self.attention(lstm_out, mask)
 
-        if return_attention:
+        if return_attention and attention_weights is not None:
             return lstm_out, attention_weights
 
         return lstm_out

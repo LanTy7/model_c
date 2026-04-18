@@ -85,22 +85,27 @@ class SelfAttention(nn.Module):
             batch_size, seq_len, self.num_heads, self.head_dim
         ).transpose(1, 2)
 
-        # Prepare attention mask for SDPA if provided
-        attn_mask = None
-        if mask is not None:
-            # mask: (batch, seq_len) True=valid
-            # SDPA expects False=keep, True=mask out
-            attn_mask = ~mask.unsqueeze(1).unsqueeze(2)  # (batch, 1, 1, seq_len)
+        # Scaled dot-product attention
+        # (batch, num_heads, seq_len, head_dim) @ (batch, num_heads, head_dim, seq_len)
+        # -> (batch, num_heads, seq_len, seq_len)
+        attn_scores = torch.matmul(Q, K.transpose(-2, -1)) / self.scale
 
-        # Use scaled_dot_product_attention (Flash Attention on CUDA)
-        attn_output = F.scaled_dot_product_attention(
-            Q, K, V,
-            attn_mask=attn_mask,
-            dropout_p=self.dropout.p if self.training else 0.0,
-            is_causal=False
-        )
-        # SDPA does not return attention weights, so we set to None
-        attn_weights = None
+        # Apply mask if provided
+        if mask is not None:
+            # mask: (batch, seq_len) -> (batch, 1, 1, seq_len)
+            # This masks out attention TO padding positions
+            mask = mask.unsqueeze(1).unsqueeze(2)
+            # Use -1e4 instead of -inf for FP16 compatibility
+            attn_scores = attn_scores.masked_fill(~mask, -1e4)
+
+        # Softmax over the last dimension (attention weights sum to 1)
+        attn_weights = F.softmax(attn_scores, dim=-1)
+        attn_weights = self.dropout(attn_weights)
+
+        # Apply attention to values
+        # (batch, num_heads, seq_len, seq_len) @ (batch, num_heads, seq_len, head_dim)
+        # -> (batch, num_heads, seq_len, head_dim)
+        attn_output = torch.matmul(attn_weights, V)
 
         # Concatenate heads: (batch, num_heads, seq_len, head_dim)
         # -> (batch, seq_len, num_heads, head_dim) -> (batch, seq_len, hidden_dim)

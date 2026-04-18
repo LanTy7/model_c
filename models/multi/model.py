@@ -123,7 +123,7 @@ class MultiClassARGClassifier(nn.Module):
         # Classifier
         logits = self.classifier(features)  # (batch, num_classes)
 
-        if return_attention:
+        if return_attention and attention_weights is not None:
             return logits, attention_weights
         return logits
 

@@ -126,7 +126,7 @@ class BinaryARGClassifier(nn.Module):
         # Classifier
         logits = self.classifier(features)  # (batch, 1)
 
-        if return_attention:
+        if return_attention and attention_weights is not None:
             return logits, attention_weights
         return logits
 
