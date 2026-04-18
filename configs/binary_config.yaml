@@ -16,14 +16,14 @@ model:
 
 training:
   epochs: 100
-  batch_size: 128
+  batch_size: 64
   lr: 0.002
   weight_decay: 0.02
   patience: 15
   grad_clip: 1.0
   warmup_epochs: 5
   use_amp: true
-  accumulation_steps: 4
+  accumulation_steps: 8
   num_workers: 8
   label_smoothing: 0.1
 

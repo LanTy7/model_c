@@ -32,8 +32,10 @@ class LabelSmoothedBCEWithLogitsLoss(nn.Module):
         self.bce = nn.BCEWithLogitsLoss(pos_weight=pos_weight, reduction='none')
 
     def forward(self, inputs, targets):
-        # targets: 0 or 1
+        # targets: 0 or 1, shape (batch,) or (batch, 1)
         # smoothed: 0 -> smoothing/2, 1 -> 1 - smoothing/2
+        if targets.dim() == 1 and inputs.dim() == 2:
+            targets = targets.unsqueeze(1)
         targets = targets * (1 - self.smoothing) + self.smoothing * 0.5
         return self.bce(inputs, targets).mean()
 
