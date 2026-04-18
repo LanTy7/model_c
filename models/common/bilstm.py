@@ -92,7 +92,7 @@ class BiLSTMAttentionBackbone(nn.Module):
         if self.use_attention:
             output, attention_weights = self.attention(output, mask)
 
-        if return_attention and attention_weights is not None:
+        if return_attention:
             return output, attention_weights
 
         return output
