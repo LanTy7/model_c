@@ -19,6 +19,9 @@ Real-world ARG prevalence is ~0.1-1%, but training data is 1:1 balanced. We impl
 - **Threshold Tuning**: Use `models/binary/evaluate.py --tune-threshold` to auto-search optimal classification threshold (optimizing F1/F2) instead of fixed 0.5. Validation metrics during training still use 0.5.
 
 ### 3. Improved Data Pipeline
+- **Two-Stage Homology-Aware Splitting**: Based on DefensePredictor (Science), uses MMseqs2 at 30% identity for redundancy reduction, followed by sensitive all-vs-all profile search + Louvain network clustering. Ensures distant homologs are kept together for rigorous generalization evaluation.
+- **5-Fold GroupKFold**: Homologous families never cross splits; each fold contains train/val/test with stratified balancing by ARG category.
+- **Novelty Test Set**: Dedicated test set of families with <30% identity to training pool, for evaluating detection of novel ARG families.
 - **Quality Control**: Retain sequences with X/B/Z/J amino acids (model supports them)
 
 ## Technology Stack
@@ -46,7 +49,7 @@ models/                       # Modular model implementations
     trainer.py              # Unified training framework (AMP, early stopping, AECR)
   binary/                    # Binary classification
     model.py                # BinaryARGClassifier (CNN + Attention + AECR)
-    train.py                # Training script (supports pos_weight)
+    train.py                # Training script (single-split and k-fold CV)
     evaluate.py             # Evaluation script with threshold tuning
     predict.py              # Inference script
   multi/                     # Multi-class classification
@@ -55,10 +58,13 @@ models/                       # Modular model implementations
     evaluate.py             # Evaluation script
     predict.py              # Inference script
 
+scripts/                     # Data preparation and splitting
+  create_training_data.py   # Two-stage homology-aware splitting (MMseqs2 + Louvain + GroupKFold)
+  prepare_training_negatives.py  # Negative sample preparation with filtering
+
 data/                        # Dataset storage
-  train.csv                 # Training data (sequence + labels)
-  val.csv                   # Validation data
-  test.csv                  # Test data
+  fold_0/ .. fold_4/        # 5-fold splits (train.csv, val.csv, test.csv, .fasta)
+  novelty_test.csv          # Novelty test set for novel ARG evaluation
   train.fasta               # FASTA format (backup)
   dataset.py                # PyTorch Dataset classes
 
@@ -66,7 +72,8 @@ utils/                       # Utility functions
   sequence_utils.py         # One-hot encoding, sequence indexing
 
 checkpoints/                 # Saved model checkpoints
-  binary/binary_best.pth
+  binary/fold_0/ .. fold_4/ # Per-fold checkpoints for k-fold CV
+  binary/binary_best.pth    # Single-split best model
   multi/multi_best.pth + metadata.json
 
 logs/                        # Training logs
@@ -82,12 +89,50 @@ figures/                     # Training curves and visualizations
 conda activate gene_pred
 ```
 
+### Data Preparation
+
+**Step 1: Prepare negative samples (optional filtering)**
+```bash
+python scripts/prepare_training_negatives.py \
+  --refined-negative-fasta data/negative_samples_refined.fasta \
+  --output-dir data \
+  --target-count 17338 \
+  --exclude-keywords \
+  --seed 42
+```
+
+**Step 2: Create two-stage homology-aware splits**
+```bash
+python scripts/create_training_data.py \
+  --positive-fasta data/ARG_DB.fasta \
+  --negative-fasta data/Non_ARG_DB.fasta \
+  --output-dir data \
+  --n-splits 5 \
+  --stage1-min-seq-id 0.30 \
+  --stage2-num-iterations 3 \
+  --novelty-threshold 0.30 \
+  --seed 42
+```
+
+This produces:
+- `data/fold_0/` .. `data/fold_4/` — each contains `train.csv`, `val.csv`, `test.csv`
+- `data/novelty_test.csv` — dedicated test set for evaluating novel ARG detection
+- `data/training_data_stats.json` — comprehensive statistics
+
 ### Training
 
 Training is done via command-line scripts (not notebooks):
 
-**Binary Classification:**
+**Binary Classification — K-Fold CV (recommended):**
 ```bash
+# Set use_kfold: true in configs/binary_config.yaml
+python models/binary/train.py --config configs/binary_config.yaml
+```
+Trains 5 models (one per fold), reports averaged metrics, and evaluates all folds on the novelty test set.
+
+**Binary Classification — Single Split (backward compatible):**
+```bash
+# Set use_kfold: false in configs/binary_config.yaml
 python models/binary/train.py --config configs/binary_config.yaml
 ```
 
@@ -157,11 +202,11 @@ python models/multi/predict.py \
 model:
   vocab_size: 25
   embedding_dim: 128
-  hidden_size: 128
-  num_layers: 2
-  dropout: 0.4
-  max_length: 1000
-  num_attention_heads: 4
+  hidden_size: 256
+  num_layers: 3
+  dropout: 0.5
+  max_length: 700
+  num_attention_heads: 8
   attention_dropout: 0.1
   cnn_out_channels: 64
   cnn_kernel_sizes: [3, 5, 7]
@@ -169,12 +214,18 @@ model:
 training:
   epochs: 100
   batch_size: 128
-  lr: 0.0005
+  lr: 0.002
   weight_decay: 0.02
   patience: 15
   lambda_aecr: 0.001
   aecr_sigma: 3.0
   aecr_lambda_loc: 0.0
+  pos_weight: 15          # Override auto-calculated pos_weight
+
+data:
+  use_kfold: true         # Enable 5-fold cross-validation
+  data_dir: "data"
+  n_splits: 5
 ```
 
 ### Multi-class Config Example
@@ -205,6 +256,30 @@ data:
   max_length_percentile: 95     # Compute max length from training data percentile
 ```
 
+## Data Splitting Methodology
+
+The project uses a **two-stage homology-aware splitting strategy** adapted from DefensePredictor (Science) to rigorously evaluate generalization to novel ARGs:
+
+### Stage 1: MMseqs2 Clustering (Redundancy Reduction)
+- **Tool**: MMseqs2 `easy-cluster`
+- **Parameters**: 30% sequence identity, 80% coverage, sensitivity=6.0
+- **Purpose**: Remove near-duplicate sequences; one representative per cluster
+
+### Stage 2: Sensitive Homology Detection
+- **Tool**: MMseqs2 profile search (3 iterations, sensitivity=7.5)
+- **Network**: Build homology graph from all-vs-all search results
+- **Clustering**: Louvain community detection on the homology network
+- **Output**: "Families" of sequences that may share remote homology
+
+### Splitting Strategy
+- **5-Fold GroupKFold**: Each family is an atomic group; all sequences in a family go to the same split
+- **Stratification**: Families are balanced by `(is_arg, category)` within each fold
+- **Novelty Test Set**: Families with maximum identity \< 30% to the training pool are held out as a dedicated novelty test set
+
+### Why This Matters
+- Old method (CD-HIT at 70%): Test sequences could still be 71%+ identical to training sequences → inflated performance
+- New method (MMseqs2 at 30% + Louvain): Test sequences are genuinely distant from training → realistic generalization estimate
+
 ## Performance Tuning Tips
 
 1. **Batch Size**: 256 works well for both tasks; reduce if OOM
@@ -232,12 +307,15 @@ data:
 
 ## Important Notes
 
-1. **Data Loading**: Always use `train.csv`/`val.csv` with `sequence` column, not FASTA files, to avoid ID conflicts
-2. **Model Checkpointing**: Best model saved based on validation F1 for both binary and multi-class
-3. **Random Seeds**: Fixed seed (42) used for reproducibility in training scripts
-4. **Multi-class Labels**: Must handle "Others" category carefully; label mapping saved in metadata.json
-5. **Mixed Precision**: Uses `torch.cuda.amp` (deprecated warnings are OK)
-6. **Default Architecture**: Self-Attention, Multi-scale CNN, and AECR regularization are enabled by default in both binary and multi-class configs
+1. **Data Loading**: Always use CSV `sequence` column, not FASTA files, to avoid ID conflicts
+2. **Data Splitting**: Two-stage homology-aware splitting (MMseqs2 + Louvain) replaces old CD-HIT method. Homologous families never cross splits.
+3. **K-Fold CV**: Binary training supports 5-fold cross-validation via `use_kfold: true` in config. Reports averaged metrics and novelty test performance.
+4. **Novelty Test Set**: Evaluates model's ability to detect ARGs from families with \<30% identity to training data. Essential for assessing true generalization.
+5. **Model Checkpointing**: Best model saved based on validation F2 (binary) or macro F1 (multi-class)
+6. **Random Seeds**: Fixed seed (42) used for reproducibility in training scripts
+7. **Multi-class Labels**: Must handle "Others" category carefully; label mapping saved in metadata.json
+8. **Mixed Precision**: Uses `torch.cuda.amp` (deprecated warnings are OK)
+9. **Default Architecture**: Self-Attention, Multi-scale CNN, and AECR regularization are enabled by default in both binary and multi-class configs
 
 ## Documentation Files
 

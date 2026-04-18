@@ -55,15 +55,19 @@ class BinaryARGClassifier(nn.Module):
             padding_idx=0  # PAD token index
         )
 
-        # Multi-scale CNN
-        from models.common.multiscale_cnn import MultiScaleCNN
-        self.cnn = MultiScaleCNN(
-            input_dim=embedding_dim,
-            out_channels=cnn_out_channels,
-            kernel_sizes=cnn_kernel_sizes,
-            dropout=dropout
-        )
-        lstm_input_size = self.cnn.output_dim
+        # Multi-scale CNN (optional)
+        if self.use_cnn:
+            from models.common.multiscale_cnn import MultiScaleCNN
+            self.cnn = MultiScaleCNN(
+                input_dim=embedding_dim,
+                out_channels=cnn_out_channels,
+                kernel_sizes=cnn_kernel_sizes,
+                dropout=dropout
+            )
+            lstm_input_size = self.cnn.output_dim
+        else:
+            self.cnn = None
+            lstm_input_size = embedding_dim
 
         # Backbone always uses attention by default
         self.backbone = BiLSTMAttentionBackbone(
@@ -113,8 +117,11 @@ class BinaryARGClassifier(nn.Module):
         if mask is None:
             mask = (x != 0)  # (batch, seq_len), True for valid positions
 
-        # Multi-scale CNN preprocessing
-        features = self.cnn(emb, mask)  # (batch, seq_len, cnn_output_dim)
+        # Multi-scale CNN preprocessing (optional)
+        if self.use_cnn:
+            features = self.cnn(emb, mask)  # (batch, seq_len, cnn_output_dim)
+        else:
+            features = emb
 
         # BiLSTM + Attention
         backbone_out = self.backbone(features, mask, return_attention=return_attention)

@@ -52,7 +52,10 @@ def load_threshold_from_file(checkpoint_dir: str) -> tuple:
 
 def load_model(checkpoint_path: str, device: str = 'cuda'):
     """Load trained model from checkpoint."""
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    except (TypeError, RuntimeError):
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
 
     # Get model config from checkpoint
     if 'model_config' in checkpoint:
@@ -94,7 +97,10 @@ def load_model(checkpoint_path: str, device: str = 'cuda'):
         }
 
     model = BinaryARGClassifier(**model_config)
-    model.load_state_dict(checkpoint['model_state_dict'])
+    if 'model_state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['model_state_dict'])
+    else:
+        model.load_state_dict(checkpoint)
     model.to(device)
     model.eval()
 
@@ -124,10 +130,23 @@ def predict_sequences(model, sequences, max_length, device, batch_size=256):
     return np.array(results)
 
 
+def predict_sequences_ensemble(models, sequences, max_length, device, batch_size=256):
+    """Predict on a list of sequences using an ensemble of models.
+
+    Returns average probabilities across all models.
+    """
+    all_fold_probs = []
+    for model in models:
+        probs = predict_sequences(model, sequences, max_length, device, batch_size)
+        all_fold_probs.append(probs)
+    return np.mean(all_fold_probs, axis=0)
+
+
 def main():
     parser = argparse.ArgumentParser(description='Predict ARG probability for sequences')
     parser.add_argument('--input', '-i', required=True, help='Input FASTA file')
-    parser.add_argument('--model', '-m', required=True, help='Model checkpoint path')
+    parser.add_argument('--model', '-m', required=True, help='Model checkpoint path (or directory for ensemble)')
+    parser.add_argument('--models', nargs='+', help='Multiple model checkpoint paths for ensemble inference')
     parser.add_argument('--output', '-o', required=True, help='Output CSV path')
     parser.add_argument('--device', '-d', default='cuda', help='Device (cuda/cpu)')
     parser.add_argument('--batch-size', '-b', type=int, default=256, help='Batch size')
@@ -135,6 +154,17 @@ def main():
                         help='Classification threshold (overrides threshold.json if provided)')
 
     args = parser.parse_args()
+
+    # Determine model paths
+    model_paths = []
+    if args.models:
+        # Explicit list of model paths for ensemble
+        model_paths = args.models
+    else:
+        # Single model path
+        model_paths = [args.model]
+
+    ensemble_mode = len(model_paths) > 1
 
     # Determine threshold to use
     # Priority: 1) User-provided --threshold, 2) threshold.json, 3) default 0.5
@@ -145,8 +175,8 @@ def main():
         threshold = args.threshold
         threshold_source = "command-line argument"
     else:
-        # Try to load from threshold.json
-        checkpoint_dir = os.path.dirname(os.path.abspath(args.model))
+        # Try to load from threshold.json (use first model's directory)
+        checkpoint_dir = os.path.dirname(os.path.abspath(model_paths[0]))
         loaded_threshold, json_source = load_threshold_from_file(checkpoint_dir)
 
         if loaded_threshold is not None:
@@ -156,24 +186,44 @@ def main():
             threshold = default_threshold
             threshold_source = f"default value ({default_threshold})"
 
-    # Load model
-    print(f"Loading model from {args.model}...")
-    model, config = load_model(args.model, args.device)
-    max_length = config.get('max_length', 1000)
+    # Load model(s)
+    configs = []
+    models = []
+    for mp in model_paths:
+        print(f"Loading model from {mp}...")
+        model, config = load_model(mp, args.device)
+        models.append(model)
+        configs.append(config)
+
+    # Use max_length from first model's config
+    max_length = configs[0].get('max_length', 1000)
 
     # Log threshold being used
     print(f"Using classification threshold: {threshold:.4f} (from {threshold_source})")
+    if ensemble_mode:
+        print(f"Ensemble mode: {len(models)} models")
 
     # Load sequences
     print(f"Loading sequences from {args.input}...")
     sequences = []
     seq_ids = []
+    skipped_empty = 0
     for record in SeqIO.parse(args.input, "fasta"):
-        sequences.append(str(record.seq).upper())
+        seq = str(record.seq).upper()
+        if len(seq) == 0:
+            skipped_empty += 1
+            continue
+        sequences.append(seq)
         seq_ids.append(record.id)
 
+    if skipped_empty > 0:
+        print(f"Warning: Skipped {skipped_empty} empty sequence(s)")
+
     print(f"Predicting on {len(sequences)} sequences...")
-    probs = predict_sequences(model, sequences, max_length, args.device, args.batch_size)
+    if ensemble_mode:
+        probs = predict_sequences_ensemble(models, sequences, max_length, args.device, args.batch_size)
+    else:
+        probs = predict_sequences(models[0], sequences, max_length, args.device, args.batch_size)
     preds = (probs > threshold).astype(int)
 
     # Save results
@@ -186,7 +236,10 @@ def main():
 
     results_df.to_csv(args.output, index=False)
     print(f"Results saved to {args.output}")
-    print(f"Predicted ARGs: {sum(preds)} ({sum(preds)/len(preds)*100:.2f}%)")
+    if len(preds) > 0:
+        print(f"Predicted ARGs: {sum(preds)} ({sum(preds)/len(preds)*100:.2f}%)")
+    else:
+        print("Warning: No sequences were predicted (empty input?)")
 
 
 if __name__ == "__main__":

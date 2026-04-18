@@ -15,14 +15,34 @@ See @workflow_orchestration.md for collaboration workflow guidelines.
 conda activate gene_pred
 ```
 
+### Data Preparation (Run Before Training)
+
+```bash
+# Step 1: Create two-stage homology-aware splits
+python scripts/create_training_data.py \
+  --positive-fasta data/ARG_DB.fasta \
+  --negative-fasta data/Non_ARG_DB.fasta \
+  --output-dir data \
+  --n-splits 5 \
+  --seed 42
+```
+
 ### Training
 
-**Default configs include Self-Attention, Multi-scale CNN, and AECR:**
+**Binary classification — K-Fold CV (recommended):**
 ```bash
-# Binary classification
+# Set use_kfold: true in configs/binary_config.yaml
 python models/binary/train.py --config configs/binary_config.yaml
+```
 
-# Multi-class classification
+**Binary classification — Single Split (backward compatible):**
+```bash
+# Set use_kfold: false in configs/binary_config.yaml
+python models/binary/train.py --config configs/binary_config.yaml
+```
+
+**Multi-class classification:**
+```bash
 python models/multi/train.py --config configs/multi_config.yaml
 ```
 
@@ -51,6 +71,9 @@ python models/multi/predict.py \
 ## Key Reminders
 
 - **Data Loading**: Always use CSV `sequence` column, not FASTA ID matching
+- **Data Splitting**: Two-stage homology-aware splitting (MMseqs2 + Louvain) ensures homologous families never cross splits. Run `scripts/create_training_data.py` before training.
+- **K-Fold CV**: Binary training supports 5-fold cross-validation via `use_kfold: true` in config. Checkpoints saved per fold in `checkpoints/binary/fold_{i}/`.
+- **Novelty Test**: `novelty_test.csv` evaluates true generalization to distant ARG families (<30% identity to training pool).
 - **Multi-class Labels**: Label mapping saved in metadata.json for inference consistency
 - **Class Balancing**: Uses pos_weight (binary) and FocalLoss (multi-class)
 - **AMP**: Uses `torch.cuda.amp` (deprecated warnings are OK)

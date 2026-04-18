@@ -71,10 +71,17 @@ def load_data(csv_path: str, logger) -> Tuple[List[str], List[int]]:
 
 def load_model(checkpoint_path: str, config: dict, device: str) -> Tuple[BinaryARGClassifier, dict]:
     """Load model from checkpoint."""
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    except (TypeError, RuntimeError):
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
 
-    # Use config from YAML file if available, otherwise infer from checkpoint
-    if config and 'model' in config:
+    # Determine model_config: priority: checkpoint > YAML config > state dict inference
+    if 'model_config' in checkpoint:
+        # Training script saves model_config in checkpoint (most reliable)
+        model_config = checkpoint['model_config']
+    elif config and 'model' in config:
+        # Fallback to YAML config
         model_config = {k: v for k, v in config['model'].items() if k != 'name'}
     else:
         # Try to infer from state dict
@@ -84,6 +91,10 @@ def load_model(checkpoint_path: str, config: dict, device: str) -> Tuple[BinaryA
             vocab_size, embedding_dim = embedding_weight.shape
         else:
             vocab_size, embedding_dim = 25, 128
+
+        # Detect enhanced architecture (CNN + Attention)
+        use_cnn = any('cnn.convs' in k for k in state_dict.keys())
+        use_attention = any('backbone.attention' in k for k in state_dict.keys())
 
         # Infer hidden size and num_layers from LSTM weights
         hidden_size = 128
@@ -100,11 +111,19 @@ def load_model(checkpoint_path: str, config: dict, device: str) -> Tuple[BinaryA
             'hidden_size': hidden_size,
             'num_layers': num_layers,
             'dropout': 0.4,
-            'max_length': 1000
+            'max_length': 1000,
+            'use_cnn': use_cnn,
+            'use_attention': use_attention,
+            'cnn_kernel_sizes': [3, 5, 7] if use_cnn else None,
+            'cnn_out_channels': 64 if use_cnn else None,
+            'num_attention_heads': 4 if use_attention else None,
         }
 
     model = BinaryARGClassifier(**model_config)
-    model.load_state_dict(checkpoint['model_state_dict'])
+    if 'model_state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['model_state_dict'])
+    else:
+        model.load_state_dict(checkpoint)
     model.to(device)
     model.eval()
 
@@ -117,7 +136,7 @@ def evaluate_model(
     device: str,
     logger,
     threshold: float = 0.5
-) -> dict:
+) -> Tuple[dict, np.ndarray, np.ndarray, np.ndarray]:
     """Run evaluation on test set with specified threshold."""
     model.eval()
 
@@ -126,11 +145,12 @@ def evaluate_model(
     all_probs = []
 
     with torch.no_grad():
-        for inputs, targets in test_loader:
+        for inputs, mask, targets in test_loader:
             inputs = inputs.to(device)
+            mask = mask.to(device)
             targets = targets.to(device)
 
-            outputs = model(inputs)
+            outputs = model(inputs, mask=mask)
 
             # Get probabilities
             probs = torch.sigmoid(outputs).cpu().numpy()
@@ -262,9 +282,10 @@ def main():
         all_probs = []
         all_targets = []
         with torch.no_grad():
-            for inputs, targets in val_loader:
+            for inputs, mask, targets in val_loader:
                 inputs = inputs.to(device)
-                outputs = model(inputs)
+                mask = mask.to(device)
+                outputs = model(inputs, mask=mask)
                 probs = torch.sigmoid(outputs).cpu().numpy()
                 all_probs.append(probs.flatten())
                 all_targets.extend(targets.cpu().numpy().flatten())

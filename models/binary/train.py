@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-"""Training script for binary ARG classification."""
+"""Training script for binary ARG classification.
+
+Supports both single-split and k-fold cross-validation modes.
+"""
 import os
 import sys
+import json
+import shutil
 import argparse
 from pathlib import Path
-from typing import Tuple, List
+from typing import Tuple, List, Dict
 
+import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -17,6 +23,7 @@ from models.binary.model import BinaryARGClassifier
 from models.common.trainer import Trainer, TrainConfig, get_cosine_schedule_with_warmup
 from data.dataset import BinarySequenceDataset
 from utils.common import setup_logging, set_seed, load_config
+from utils.metrics import find_optimal_threshold
 
 
 class LabelSmoothedBCEWithLogitsLoss(nn.Module):
@@ -40,30 +47,37 @@ class LabelSmoothedBCEWithLogitsLoss(nn.Module):
         return self.bce(inputs, targets).mean()
 
 
-def load_data(csv_path: str, logger) -> Tuple[List[str], List[int]]:
+def load_data(csv_path: str, logger=None) -> Tuple[List[str], List[int]]:
     """Load data from CSV (sequence column)."""
     df = pd.read_csv(csv_path)
-    logger.info(f"Loaded {len(df)} entries from {csv_path}")
+    if logger:
+        logger.info(f"Loaded {len(df)} entries from {csv_path}")
 
     # Use sequence column directly
     sequences = df['sequence'].str.upper().tolist()
     labels = df['is_arg'].astype(int).tolist()
 
-    logger.info(f"Data: {sum(labels)} positive, {len(labels)-sum(labels)} negative")
+    if logger:
+        logger.info(f"Data: {sum(labels)} positive, {len(labels)-sum(labels)} negative")
     return sequences, labels
 
 
-def create_dataloaders(config: dict, logger) -> Tuple[DataLoader, DataLoader, float]:
+def create_dataloaders(
+    train_csv: str,
+    val_csv: str,
+    config: dict,
+    logger
+) -> Tuple[DataLoader, DataLoader, float]:
     """Create train and validation dataloaders."""
     max_length = config['model']['max_length']
 
     # Load train data from CSV
     logger.info("Loading training data...")
-    train_seqs, train_labels = load_data(config['data']['train_csv'], logger)
+    train_seqs, train_labels = load_data(train_csv, logger)
 
     # Load val data from CSV
     logger.info("Loading validation data...")
-    val_seqs, val_labels = load_data(config['data']['val_csv'], logger)
+    val_seqs, val_labels = load_data(val_csv, logger)
 
     # Compute or get pos_weight
     n_pos = sum(train_labels)
@@ -106,38 +120,55 @@ def create_dataloaders(config: dict, logger) -> Tuple[DataLoader, DataLoader, fl
     return train_loader, val_loader, pos_weight
 
 
-def main(config_path: str):
-    """Main training function."""
-    # Load config
-    config = load_config(config_path)
+def create_test_loader(test_csv: str, config: dict):
+    """Create test dataloader."""
+    max_length = config['model']['max_length']
+    test_seqs, test_labels = load_data(test_csv, None)
+    test_dataset = BinarySequenceDataset(test_seqs, test_labels, max_length)
+    return DataLoader(
+        test_dataset,
+        batch_size=config['training']['batch_size'],
+        shuffle=False,
+        num_workers=config['training']['num_workers'],
+        persistent_workers=config['training']['num_workers'] > 0,
+        pin_memory=True
+    )
 
-    # Setup
-    set_seed(config.get('seed', 42))
-    log_dir = config['paths']['log_dir']
-    logger = setup_logging(log_dir)
-    device = config.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
 
+def train_single_fold(
+    config: dict,
+    logger,
+    device: str,
+    fold_idx: int = None,
+    train_csv: str = None,
+    val_csv: str = None,
+    test_csv: str = None,
+    save_name: str = 'binary_best.pth'
+) -> Tuple[Dict, str]:
+    """Train a single model fold.
+
+    Returns:
+        (history, best_model_path)
+    """
+    fold_label = f"Fold {fold_idx}" if fold_idx is not None else "Single split"
+    logger.info("\n" + "=" * 60)
+    logger.info(f"Training: {fold_label}")
     logger.info("=" * 60)
-    logger.info("Binary ARG Classification Training")
-    logger.info("=" * 60)
-    logger.info(f"Device: {device}")
-    logger.info(f"Config: {config_path}")
 
     # Create dataloaders
-    train_loader, val_loader, pos_weight = create_dataloaders(config, logger)
+    train_loader, val_loader, pos_weight = create_dataloaders(
+        train_csv, val_csv, config, logger
+    )
 
     # Create model
     model_config = {k: v for k, v in config['model'].items() if k != 'name'}
     model = BinaryARGClassifier(**model_config)
     logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
-    logger.info("Using default enhanced architecture (CNN + Attention)")
 
     # Loss function with pos_weight and optional label smoothing
     pos_weight_tensor = torch.tensor([pos_weight], dtype=torch.float32).to(device)
-    logger.info(f"Using pos_weight: {pos_weight:.4f}")
     label_smoothing = config['training'].get('label_smoothing', 0.0)
     if label_smoothing > 0:
-        logger.info(f"Using label smoothing: {label_smoothing}")
         criterion = LabelSmoothedBCEWithLogitsLoss(
             pos_weight=pos_weight_tensor,
             smoothing=label_smoothing
@@ -153,7 +184,6 @@ def main(config_path: str):
     )
 
     # Scheduler
-    # Compute steps based on optimizer steps (effective batches), not raw batches
     accumulation_steps = config['training'].get('accumulation_steps', 1)
     steps_per_epoch = (len(train_loader) + accumulation_steps - 1) // accumulation_steps
     total_steps = steps_per_epoch * config['training']['epochs']
@@ -166,6 +196,20 @@ def main(config_path: str):
     fig_dir = config['paths'].get('fig_dir')
     log_dir = config['paths']['log_dir']
 
+    # Per-fold save dir for k-fold
+    if fold_idx is not None:
+        fold_save_dir = os.path.join(save_dir, f'fold_{fold_idx}')
+        fold_fig_dir = os.path.join(fig_dir, f'fold_{fold_idx}') if fig_dir else None
+        fold_log_dir = os.path.join(log_dir, f'fold_{fold_idx}')
+        os.makedirs(fold_save_dir, exist_ok=True)
+        if fold_fig_dir:
+            os.makedirs(fold_fig_dir, exist_ok=True)
+        os.makedirs(fold_log_dir, exist_ok=True)
+    else:
+        fold_save_dir = save_dir
+        fold_fig_dir = fig_dir
+        fold_log_dir = log_dir
+
     train_config = TrainConfig(
         epochs=training_config['epochs'],
         batch_size=training_config['batch_size'],
@@ -176,12 +220,11 @@ def main(config_path: str):
         warmup_epochs=training_config['warmup_epochs'],
         use_amp=training_config.get('use_amp', True),
         accumulation_steps=training_config.get('accumulation_steps', 1),
-        save_dir=save_dir,
+        save_dir=fold_save_dir,
         device=device,
         num_workers=training_config.get('num_workers', 4),
-        fig_dir=fig_dir,
+        fig_dir=fold_fig_dir,
         class_names=['non-ARG', 'ARG'],
-        # AECR parameters (enabled by default)
         use_aecr=True,
         lambda_aecr=training_config.get('lambda_aecr', 0.1),
         aecr_sigma=training_config.get('aecr_sigma', 3.0),
@@ -190,7 +233,6 @@ def main(config_path: str):
     )
 
     # Define metric function for early stopping (use validation F2)
-    # F2 emphasizes recall, which is critical for ARG detection (avoid missing ARGs)
     def val_metric_fn(targets, preds, probs):
         from sklearn.metrics import fbeta_score
         return fbeta_score(targets, preds, beta=2.0, average='binary', zero_division=0)
@@ -208,43 +250,303 @@ def main(config_path: str):
     )
 
     # Train
-    history = trainer.train(train_loader, val_loader, save_name='binary_best.pth')
+    history = trainer.train(train_loader, val_loader, save_name=save_name)
 
-    logger.info("=" * 60)
-    logger.info("Training completed!")
     logger.info(f"Best model saved to: {trainer.best_model_path}")
-    logger.info(f"Best metric: {trainer.best_metric:.4f}")
+    logger.info(f"Best validation metric: {trainer.best_metric:.4f}")
 
-    # Test set evaluation (if test data exists)
-    if 'test_csv' in config['data'] and os.path.exists(config['data']['test_csv']):
-        logger.info("Loading test data for evaluation...")
-        test_seqs, test_labels = load_data(config['data']['test_csv'], logger)
-        max_length = config['model']['max_length']
-        test_dataset = BinarySequenceDataset(test_seqs, test_labels, max_length)
-        test_loader = DataLoader(
-            test_dataset,
-            batch_size=config['training']['batch_size'],
-            shuffle=False,
-            num_workers=config['training']['num_workers'],
-            persistent_workers=config['training']['num_workers'] > 0,
-            pin_memory=True
-        )
+    # Threshold tuning on validation set
+    logger.info("Tuning classification threshold on validation set...")
+    model.eval()
+    val_all_probs = []
+    val_all_labels = []
+    with torch.no_grad():
+        for batch in val_loader:
+            inputs, mask, targets = batch
+            inputs = inputs.to(device)
+            mask = mask.to(device)
+            outputs = model(inputs, mask=mask)
+            probs = torch.sigmoid(outputs).cpu().numpy().flatten()
+            val_all_probs.extend(probs.tolist())
+            val_all_labels.extend(targets.numpy().flatten().tolist())
 
-        # Load tuned threshold if available for more accurate test evaluation
+    val_all_probs = np.array(val_all_probs)
+    val_all_labels = np.array(val_all_labels)
+    optimal_threshold, best_f2, _ = find_optimal_threshold(
+        val_all_labels, val_all_probs, metric='f2', beta=2.0
+    )
+    threshold_data = {
+        "optimal_threshold": float(optimal_threshold),
+        "tune_metric": "f2",
+        "description": "Threshold optimized for F2 score on validation set"
+    }
+    threshold_path = os.path.join(fold_save_dir, 'threshold.json')
+    with open(threshold_path, 'w') as f:
+        json.dump(threshold_data, f, indent=2)
+    logger.info(f"Optimal threshold: {optimal_threshold:.4f} (F2: {best_f2:.4f})")
+    logger.info(f"Threshold saved to: {threshold_path}")
+
+    # Test evaluation
+    test_metrics = None
+    if test_csv and os.path.exists(test_csv):
+        logger.info(f"Evaluating on test set: {test_csv}")
+        test_loader = create_test_loader(test_csv, config)
+
         threshold = 0.5
-        threshold_path = os.path.join(save_dir, 'threshold.json')
+        threshold_path = os.path.join(fold_save_dir, 'threshold.json')
         if os.path.exists(threshold_path):
-            import json
             with open(threshold_path) as f:
                 threshold_data = json.load(f)
                 threshold = threshold_data.get('optimal_threshold', 0.5)
             logger.info(f"Using tuned threshold: {threshold:.4f}")
 
-        test_metrics = trainer.evaluate(test_loader, class_names=['non-ARG', 'ARG'], threshold=threshold)
-
-        # Log test metrics
+        test_metrics = trainer.evaluate(
+            test_loader, class_names=['non-ARG', 'ARG'], threshold=threshold
+        )
         from utils.metrics import format_metrics_for_display
         logger.info("\n" + format_metrics_for_display(test_metrics))
+
+    return history, trainer.best_model_path, trainer.best_metric, test_metrics
+
+
+def train_kfold(config: dict, logger, device: str):
+    """Train k-fold cross-validation."""
+    data_dir = config['data'].get('data_dir', 'data')
+    n_splits = config['data'].get('n_splits', 5)
+
+    logger.info("=" * 60)
+    logger.info(f"K-Fold Cross-Validation: {n_splits} folds")
+    logger.info("=" * 60)
+
+    fold_results = []
+    all_test_metrics = []
+
+    for fold_idx in range(n_splits):
+        fold_dir = os.path.join(data_dir, f'fold_{fold_idx}')
+        train_csv = os.path.join(fold_dir, 'train.csv')
+        val_csv = os.path.join(fold_dir, 'val.csv')
+        test_csv = os.path.join(fold_dir, 'test.csv')
+
+        if not os.path.exists(train_csv):
+            logger.warning(f"Fold {fold_idx} data not found at {train_csv}, skipping")
+            continue
+
+        history, model_path, best_metric, test_metrics = train_single_fold(
+            config=config,
+            logger=logger,
+            device=device,
+            fold_idx=fold_idx,
+            train_csv=train_csv,
+            val_csv=val_csv,
+            test_csv=test_csv,
+            save_name='binary_best.pth'
+        )
+
+        fold_results.append({
+            'fold': fold_idx,
+            'best_metric': best_metric,
+            'model_path': model_path,
+            'test_metrics': test_metrics
+        })
+        if test_metrics:
+            all_test_metrics.append(test_metrics)
+
+    # Summary
+    logger.info("\n" + "=" * 60)
+    logger.info("K-Fold Cross-Validation Summary")
+    logger.info("=" * 60)
+
+    for result in fold_results:
+        bm = result['best_metric']
+        bm_str = f"{bm:.4f}" if bm is not None else "N/A"
+        logger.info(f"Fold {result['fold']}: best_val_metric={bm_str}")
+
+    if all_test_metrics:
+        # Average test metrics across folds
+        avg_metrics = {}
+        for key in all_test_metrics[0].keys():
+            if isinstance(all_test_metrics[0][key], (int, float)):
+                values = [m[key] for m in all_test_metrics if key in m]
+                avg_metrics[key] = sum(values) / len(values) if values else 0
+
+        logger.info("\nAverage Test Metrics Across Folds:")
+        for key, val in avg_metrics.items():
+            logger.info(f"  {key}: {val:.4f}")
+
+    # Evaluate on novelty test set if available
+    novelty_csv = os.path.join(data_dir, 'novelty_test.csv')
+    if os.path.exists(novelty_csv):
+        logger.info("\n" + "=" * 60)
+        logger.info("Novelty Test Set Evaluation")
+        logger.info("=" * 60)
+        evaluate_novelty_test(config, logger, device, novelty_csv, fold_results)
+
+    # Select best fold and copy to top-level checkpoint for backward-compatible inference
+    valid_results = [r for r in fold_results if r['best_metric'] is not None]
+    if valid_results:
+        best_result = max(valid_results, key=lambda r: r['best_metric'])
+        best_fold_idx = best_result['fold']
+        best_model_src = best_result['model_path']
+
+        save_dir = config['paths']['save_dir']
+        os.makedirs(save_dir, exist_ok=True)
+
+        # Copy best model
+        best_model_dst = os.path.join(save_dir, 'binary_best.pth')
+        if best_model_src and os.path.exists(best_model_src):
+            shutil.copy2(best_model_src, best_model_dst)
+            logger.info("\n" + "=" * 60)
+            logger.info(f"Best model selected from Fold {best_fold_idx}")
+            logger.info(f"Copied to: {best_model_dst}")
+
+        # Copy corresponding threshold
+        best_threshold_src = os.path.join(save_dir, f'fold_{best_fold_idx}', 'threshold.json')
+        best_threshold_dst = os.path.join(save_dir, 'threshold.json')
+        if os.path.exists(best_threshold_src):
+            shutil.copy2(best_threshold_src, best_threshold_dst)
+            logger.info(f"Threshold copied to: {best_threshold_dst}")
+        logger.info("=" * 60)
+
+    return fold_results
+
+
+def evaluate_novelty_test(
+    config: dict,
+    logger,
+    device: str,
+    novelty_csv: str,
+    fold_results: List[Dict]
+):
+    """Evaluate all fold models on the novelty test set."""
+    from utils.metrics import compute_comprehensive_metrics, format_metrics_for_display
+
+    logger.info(f"Novelty test set: {novelty_csv}")
+    test_loader = create_test_loader(novelty_csv, config)
+
+    novelty_metrics_list = []
+    for result in fold_results:
+        fold_idx = result['fold']
+        model_path = result['model_path']
+
+        if not model_path or not os.path.exists(model_path):
+            logger.warning(f"Model not found for fold {fold_idx}: {model_path}")
+            continue
+
+        # Load model
+        model_config = {k: v for k, v in config['model'].items() if k != 'name'}
+        model = BinaryARGClassifier(**model_config)
+        checkpoint = torch.load(model_path, map_location=device)
+        if 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'])
+        else:
+            model.load_state_dict(checkpoint)
+        model = model.to(device)
+        model.eval()
+
+        # Load tuned threshold if available, otherwise use 0.5
+        threshold = 0.5
+        fold_save_dir = os.path.join(config['paths']['save_dir'], f'fold_{fold_idx}')
+        threshold_path = os.path.join(fold_save_dir, 'threshold.json')
+        if os.path.exists(threshold_path):
+            with open(threshold_path) as f:
+                threshold_data = json.load(f)
+                threshold = threshold_data.get('optimal_threshold', 0.5)
+            logger.info(f"Fold {fold_idx} using tuned threshold: {threshold:.4f}")
+
+        # Run inference
+        all_probs = []
+        all_labels = []
+        with torch.no_grad():
+            for batch in test_loader:
+                indices, mask, labels = batch
+                indices = indices.to(device)
+                mask = mask.to(device)
+                outputs = model(indices, mask=mask)
+                probs = torch.sigmoid(outputs).cpu().numpy().flatten()
+                all_probs.extend(probs.tolist())
+                all_labels.extend(labels.numpy().flatten().tolist())
+
+        all_probs = np.array(all_probs)
+        all_labels = np.array(all_labels)
+        preds = (all_probs >= threshold).astype(int)
+
+        metrics = compute_comprehensive_metrics(all_labels, preds, all_probs)
+        novelty_metrics_list.append(metrics)
+        logger.info(f"\nFold {fold_idx} on novelty test:")
+        logger.info(format_metrics_for_display(metrics))
+
+    if novelty_metrics_list:
+        avg_novelty = {}
+        for key in novelty_metrics_list[0].keys():
+            if isinstance(novelty_metrics_list[0][key], (int, float)):
+                values = [m[key] for m in novelty_metrics_list if key in m]
+                avg_novelty[key] = sum(values) / len(values) if values else 0
+
+        logger.info("\n" + "=" * 60)
+        logger.info("Average Novelty Test Metrics (All Folds)")
+        logger.info("=" * 60)
+        for key, val in avg_novelty.items():
+            logger.info(f"  {key}: {val:.4f}")
+
+        # Save summary
+        summary = {
+            'fold_results': [
+                {
+                    'fold': r['fold'],
+                    'best_metric': r['best_metric'],
+                    'model_path': r['model_path']
+                } for r in fold_results
+            ],
+            'average_test_metrics': {k: round(v, 4) for k, v in avg_novelty.items()}
+        }
+        save_dir = config['paths']['save_dir']
+        summary_path = os.path.join(save_dir, 'kfold_summary.json')
+        with open(summary_path, 'w') as f:
+            json.dump(summary, f, indent=2)
+        logger.info(f"\nK-fold summary saved to {summary_path}")
+
+
+def main(config_path: str):
+    """Main training function."""
+    # Load config
+    config = load_config(config_path)
+
+    # Setup
+    set_seed(config.get('seed', 42))
+    log_dir = config['paths']['log_dir']
+    logger = setup_logging(log_dir)
+    device = config.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
+
+    logger.info("=" * 60)
+    logger.info("Binary ARG Classification Training")
+    logger.info("=" * 60)
+    logger.info(f"Device: {device}")
+    logger.info(f"Config: {config_path}")
+
+    # Determine mode: k-fold or single split
+    use_kfold = config['data'].get('use_kfold', False)
+
+    if use_kfold:
+        train_kfold(config, logger, device)
+    else:
+        # Single split mode (backward compatible)
+        train_csv = config['data']['train_csv']
+        val_csv = config['data']['val_csv']
+        test_csv = config['data'].get('test_csv')
+
+        history, model_path, best_metric, test_metrics = train_single_fold(
+            config=config,
+            logger=logger,
+            device=device,
+            train_csv=train_csv,
+            val_csv=val_csv,
+            test_csv=test_csv,
+            save_name='binary_best.pth'
+        )
+
+        logger.info("=" * 60)
+        logger.info("Training completed!")
+        logger.info(f"Best model: {model_path}")
 
 
 if __name__ == "__main__":

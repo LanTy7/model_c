@@ -297,7 +297,7 @@ class Trainer:
             # Collect predictions for training metrics
             with torch.no_grad():
                 if is_binary:
-                    probs = torch.sigmoid(outputs_for_pred).cpu().numpy()
+                    probs = torch.sigmoid(outputs_for_pred).cpu().numpy().squeeze(-1)
                     preds = (probs > 0.5).astype(int)
                 else:
                     probs = torch.softmax(outputs_for_pred, dim=1).cpu().numpy()
@@ -413,7 +413,7 @@ class Trainer:
 
                 # Store predictions
                 if is_binary:  # Binary classification
-                    probs = torch.sigmoid(outputs).cpu().numpy()
+                    probs = torch.sigmoid(outputs).cpu().numpy().squeeze(-1)
                     preds = (probs > 0.5).astype(int)
                 else:  # Multi-class
                     probs = torch.softmax(outputs, dim=1).cpu().numpy()
@@ -671,7 +671,11 @@ class Trainer:
 
     def load_checkpoint(self, path: str) -> Dict:
         """Load model checkpoint."""
-        checkpoint = torch.load(path, map_location=self.config.device, weights_only=True)
+        try:
+            checkpoint = torch.load(path, map_location=self.config.device, weights_only=True)
+        except (TypeError, RuntimeError):
+            # Fallback for older PyTorch or checkpoints with custom objects
+            checkpoint = torch.load(path, map_location=self.config.device, weights_only=False)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         return checkpoint
 

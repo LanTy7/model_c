@@ -38,6 +38,13 @@ training:
   aecr_lambda_loc: 0.0
 
 data:
+  # K-fold cross-validation mode (two-stage homology-aware splitting)
+  # Set use_kfold: true to train on fold_0/ .. fold_4/ splits
+  use_kfold: true
+  data_dir: "data"
+  n_splits: 5
+
+  # Single-split mode (fallback, used when use_kfold: false)
   train_csv: "data/train.csv"
   val_csv: "data/val.csv"
   test_csv: "data/test.csv"
