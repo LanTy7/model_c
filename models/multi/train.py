@@ -199,8 +199,11 @@ def main(config_path: str):
     )
 
     # Scheduler
-    total_steps = len(train_loader) * config['training']['epochs']
-    warmup_steps = len(train_loader) * config['training']['warmup_epochs']
+    # Compute steps based on optimizer steps (effective batches), not raw batches
+    accumulation_steps = config['training'].get('accumulation_steps', 1)
+    steps_per_epoch = (len(train_loader) + accumulation_steps - 1) // accumulation_steps
+    total_steps = steps_per_epoch * config['training']['epochs']
+    warmup_steps = steps_per_epoch * config['training']['warmup_epochs']
     scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, total_steps)
 
     # Training config

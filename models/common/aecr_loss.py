@@ -107,8 +107,8 @@ class AECRLoss(nn.Module):
 
         # === Component 1: Entropy Minimization ===
         # We want attention weights to be concentrated (low entropy)
-        # Loss = -sum(p * log(p))
-        entropy_per_position = -p * torch.log(p)
+        # Entropy = -sum(p * log(p)) over the key dimension for each query position
+        entropy_per_position = -(p * torch.log(p)).sum(dim=-1)  # (batch, heads, seq_len)
         entropy_loss = entropy_per_position.mean()
 
         # === Component 2: Local Continuity Constraint ===

@@ -35,9 +35,14 @@ def one_hot_encode(sequence: str, max_length: int) -> np.ndarray:
     if len(sequence) == 0:
         raise ValueError("Cannot encode an empty sequence.")
 
+    # Center crop if sequence is too long
+    if len(sequence) > max_length:
+        start = (len(sequence) - max_length) // 2
+        sequence = sequence[start:start + max_length]
+
     encoding = np.zeros((max_length, 21), dtype=np.float32)
 
-    for i in range(min(len(sequence), max_length)):
+    for i in range(len(sequence)):
         aa = sequence[i].upper()
         if aa in AA_DICT:
             idx = AA_DICT[aa]
@@ -72,8 +77,12 @@ def sequence_to_indices(sequence: str, max_length: int) -> np.ndarray:
     if len(sequence) == 0:
         raise ValueError("Cannot encode an empty sequence.")
 
+    # Center crop if sequence is too long
+    if len(sequence) > max_length:
+        start = (len(sequence) - max_length) // 2
+        sequence = sequence[start:start + max_length]
+
     indices = [AA_DICT_EMBED.get(aa.upper(), 21) for aa in sequence]
-    indices = indices[:max_length]  # Truncate
 
     if len(indices) < max_length:   # Pad
         indices += [0] * (max_length - len(indices))

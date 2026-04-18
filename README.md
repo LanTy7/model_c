@@ -11,7 +11,7 @@ Models use **BiLSTM + Self-Attention + Multi-scale CNN** architecture with modul
 ### 1. Core Components (Default)
 - **Self-Attention Mechanism**: Multi-head attention after BiLSTM for better focus on important sequence positions
 - **Multi-scale CNN**: Parallel convolutions with kernel sizes [3, 5, 7] to capture local motifs at different scales
-- **AECR Regularization**: Attention Entropy and Continuity Regularization for sharper, smoother attention patterns
+- **AECR Regularization**: Attention Entropy Regularization for sharper, more focused attention patterns
 
 ### 2. Class Imbalance Handling
 Real-world ARG prevalence is ~0.1-1%, but training data is 1:1 balanced. We implemented:
@@ -130,7 +130,7 @@ python models/multi/predict.py \
 ### Model Configuration
 - **Binary model**: Embedding (vocab_size=25) -> Multi-scale CNN -> BiLSTM + Self-Attention (hidden=128, 2 layers) -> FC
 - **Multi-class model**: One-hot (21 dims) -> Multi-scale CNN -> BiLSTM + Self-Attention (hidden=256, 3 layers) -> FC with Focal Loss
-- **AECR**: Attention Entropy and Continuity Regularization is applied during training by default
+- **AECR**: Attention Entropy Regularization is applied during training by default
 
 ### Data Processing
 - Amino acid vocabulary: 20 standard + X (unknown) + PAD
@@ -172,8 +172,9 @@ training:
   lr: 0.0005
   weight_decay: 0.02
   patience: 15
-  lambda_aecr: 0.1
+  lambda_aecr: 0.001
   aecr_sigma: 3.0
+  aecr_lambda_loc: 0.0
 ```
 
 ### Multi-class Config Example
@@ -195,8 +196,9 @@ focal_loss:
   class_weight_clip: [0.5, 3.0]
 
 training:
-  lambda_aecr: 0.1
+  lambda_aecr: 0.001
   aecr_sigma: 3.0
+  aecr_lambda_loc: 0.0
 
 data:
   min_samples: 40               # Merge rare categories

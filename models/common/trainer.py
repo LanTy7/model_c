@@ -35,10 +35,10 @@ class TrainConfig:
     class_names: Optional[List[str]] = None  # Class names for visualization
     # AECR loss configuration (enabled by default)
     use_aecr: bool = True  # Whether to use AECR attention regularization
-    lambda_aecr: float = 0.1  # Weight for AECR loss
+    lambda_aecr: float = 0.001  # Weight for AECR loss
     aecr_sigma: float = 3.0  # Gaussian kernel sigma for AECR
     aecr_lambda_ent: float = 1.0  # Entropy loss weight
-    aecr_lambda_loc: float = 0.5  # Local continuity loss weight
+    aecr_lambda_loc: float = 0.0  # Local continuity loss weight (disabled by default)
 
 
 class EarlyStopping:
@@ -129,9 +129,10 @@ class Trainer:
         self.scaler = GradScaler() if config.use_amp else None
 
         # Early stopping
+        # current_metric is always "higher is better": metric_fn output or -val_loss
         self.early_stopping = EarlyStopping(
             patience=config.patience,
-            mode='max' if metric_fn else 'min'
+            mode='max'
         )
 
         # Tracking
@@ -147,7 +148,7 @@ class Trainer:
             'val_f1': [],
             'val_auc': []
         }
-        self.best_metric = -float('inf') if metric_fn else float('inf')
+        self.best_metric = -float('inf')
         self.best_model_path = None
 
         os.makedirs(config.save_dir, exist_ok=True)
@@ -178,6 +179,11 @@ class Trainer:
         total_aecr_loss = 0.0
         num_batches = 0
 
+        # Collect predictions and targets for training metrics
+        all_preds = []
+        all_targets = []
+        all_probs = []
+
         # Check if model uses attention
         model_uses_attention = getattr(self.model, 'use_attention', False)
 
@@ -195,8 +201,10 @@ class Trainer:
                         outputs = self.model(inputs)
                         attention_weights = None
 
-                    # Handle shape mismatch for binary classification
-                    if outputs.dim() == 2 and outputs.shape[1] == 1 and targets.dim() == 1:
+                    # Determine binary vs multi-class before squeezing
+                    is_binary = outputs.dim() == 2 and outputs.shape[1] == 1 and targets.dim() == 1
+                    outputs_for_pred = outputs
+                    if is_binary:
                         outputs = outputs.squeeze(1)
 
                     # Task loss
@@ -219,8 +227,10 @@ class Trainer:
                     outputs = self.model(inputs)
                     attention_weights = None
 
-                # Handle shape mismatch for binary classification
-                if outputs.dim() == 2 and outputs.shape[1] == 1 and targets.dim() == 1:
+                # Determine binary vs multi-class before squeezing
+                is_binary = outputs.dim() == 2 and outputs.shape[1] == 1 and targets.dim() == 1
+                outputs_for_pred = outputs
+                if is_binary:
                     outputs = outputs.squeeze(1)
 
                 # Task loss
@@ -262,6 +272,19 @@ class Trainer:
 
                 if self.scheduler:
                     self.scheduler.step()
+
+            # Collect predictions for training metrics
+            with torch.no_grad():
+                if is_binary:
+                    probs = torch.sigmoid(outputs_for_pred).cpu().numpy()
+                    preds = (probs > 0.5).astype(int)
+                else:
+                    probs = torch.softmax(outputs_for_pred, dim=1).cpu().numpy()
+                    preds = np.argmax(probs, axis=1)
+
+                all_preds.extend(preds.flatten())
+                all_targets.extend(targets.cpu().numpy().flatten())
+                all_probs.append(probs)
 
             total_loss += raw_loss.item()
             total_task_loss += task_loss.item()
@@ -309,7 +332,11 @@ class Trainer:
                 f"(Task: {avg_task_loss:.4f}, AECR: {avg_aecr_loss:.4f})"
             )
 
-        return avg_loss
+        # Compute training metrics
+        all_probs = np.concatenate(all_probs, axis=0)
+        train_metrics = self._compute_metrics(all_targets, all_preds, all_probs)
+
+        return avg_loss, train_metrics
 
     def _validate(self, val_loader: DataLoader) -> tuple:
         """Validate the model."""
@@ -421,7 +448,7 @@ class Trainer:
             start_time = time.time()
 
             # Train
-            train_loss = self._train_epoch(train_loader)
+            train_loss, train_metrics = self._train_epoch(train_loader)
 
             # Validate
             val_loss, val_metrics, val_targets, val_preds, val_probs = self._validate(val_loader)
@@ -434,6 +461,7 @@ class Trainer:
 
             # Track history
             self.history['train_loss'].append(train_loss)
+            self.history['train_metric'].append(train_metrics.get('f1', 0))
             self.history['val_loss'].append(val_loss)
             self.history['val_metric'].append(current_metric)
             self.history['lr'].append(self.optimizer.param_groups[0]['lr'])
@@ -455,7 +483,7 @@ class Trainer:
             )
 
             # Save best model
-            is_best = current_metric > self.best_metric if self.metric_fn else current_metric < self.best_metric
+            is_best = current_metric > self.best_metric
             if is_best:
                 self.best_metric = current_metric
                 self.best_model_path = save_path

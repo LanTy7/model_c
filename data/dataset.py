@@ -23,10 +23,7 @@ class BinarySequenceDataset(Dataset):
     def __getitem__(self, idx):
         seq = self.sequences[idx]
         label = self.labels[idx]
-        # Random crop for training if sequence is too long (data augmentation)
-        if self.training and len(seq) > self.max_length:
-            start = random.randint(0, len(seq) - self.max_length)
-            seq = seq[start:start + self.max_length]
+        # sequence_to_indices handles center crop internally
         encoded = sequence_to_indices(seq, self.max_length)
         return torch.from_numpy(encoded), torch.tensor(label, dtype=torch.float32)
 

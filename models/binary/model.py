@@ -17,7 +17,7 @@ class BinaryARGClassifier(nn.Module):
 
     def __init__(
         self,
-        vocab_size: int = 22,
+        vocab_size: int = 25,
         embedding_dim: int = 128,
         hidden_size: int = 128,
         num_layers: int = 2,

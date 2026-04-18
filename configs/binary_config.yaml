@@ -32,10 +32,10 @@ training:
   pos_weight: 15
 
   # AECR regularization (enabled by default)
-  lambda_aecr: 0.1
+  lambda_aecr: 0.001
   aecr_sigma: 3.0
   aecr_lambda_ent: 1.0
-  aecr_lambda_loc: 0.5
+  aecr_lambda_loc: 0.0
 
 data:
   train_csv: "data/train.csv"

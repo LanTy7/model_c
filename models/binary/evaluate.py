@@ -85,14 +85,14 @@ def load_model(checkpoint_path: str, config: dict, device: str) -> Tuple[BinaryA
         else:
             vocab_size, embedding_dim = 25, 128
 
-        # Infer hidden size from LSTM weights
+        # Infer hidden size and num_layers from LSTM weights
         hidden_size = 128
         num_layers = 1
         for key in state_dict.keys():
-            if 'lstm.weight_ih_l0' in key:
+            if 'lstm.weight_ih_l0' in key and '_reverse' not in key:
                 hidden_size = state_dict[key].shape[0] // 4
-            if 'lstm.weight_ih_l1' in key:
-                num_layers = 2
+        num_layers = sum(1 for k in state_dict.keys()
+                         if 'lstm.weight_ih_l' in k and '_reverse' not in k)
 
         model_config = {
             'vocab_size': vocab_size,

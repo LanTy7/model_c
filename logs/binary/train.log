@@ -100,3 +100,48 @@ Class                   Precision       Recall           F1    Support
 non-ARG                    0.9907       0.9942       0.9924      18255
 ARG                        0.9046       0.8546       0.8789       1176
 ============================================================
+2026-04-18 12:54:27,647 - INFO - ============================================================
+2026-04-18 12:54:27,647 - INFO - Binary ARG Classification Training
+2026-04-18 12:54:27,648 - INFO - ============================================================
+2026-04-18 12:54:27,649 - INFO - Device: cuda
+2026-04-18 12:54:27,649 - INFO - Config: configs/binary_config.yaml
+2026-04-18 12:54:27,650 - INFO - Loading training data...
+2026-04-18 12:54:28,475 - INFO - Loaded 160224 entries from data/train.csv
+2026-04-18 12:54:28,593 - INFO - Data: 13463 positive, 146761 negative
+2026-04-18 12:54:28,593 - INFO - Loading validation data...
+2026-04-18 12:54:28,747 - INFO - Loaded 20839 entries from data/val.csv
+2026-04-18 12:54:28,761 - INFO - Data: 2699 positive, 18140 negative
+2026-04-18 12:54:28,772 - INFO - Using custom pos_weight: 15.0000 (auto-calculated would be: 10.9011)
+2026-04-18 12:54:28,891 - INFO - Model parameters: 5,515,265
+2026-04-18 12:54:28,892 - INFO - Using default enhanced architecture (CNN + Attention)
+2026-04-18 12:54:29,070 - INFO - Using pos_weight: 15.0000
+2026-04-18 12:54:29,070 - INFO - Using label smoothing: 0.1
+2026-04-18 12:54:32,647 - INFO - AECR loss enabled (lambda=0.1, sigma=3.0)
+2026-04-18 12:54:32,649 - INFO - Starting training for 100 epochs...
+2026-04-18 12:54:32,650 - INFO - Device: cuda
+2026-04-18 12:54:32,665 - INFO - AMP enabled: True
+2026-04-18 13:09:25,230 - INFO - Epoch 001/100 | Loss: 1.7602/1.5985 | Acc: 0.4181 | F1: 0.4023 | LR: 0.000050 | Time: 892.6s
+2026-04-18 13:09:25,420 - INFO -   -> Best model saved! (Metric: 0.5208)
+
+2026-04-18 13:29:13,311 - INFO - ============================================================
+2026-04-18 13:29:13,311 - INFO - Binary ARG Classification Training
+2026-04-18 13:29:13,312 - INFO - ============================================================
+2026-04-18 13:29:13,312 - INFO - Device: cuda
+2026-04-18 13:29:13,318 - INFO - Config: configs/binary_config.yaml
+2026-04-18 13:29:13,319 - INFO - Loading training data...
+2026-04-18 13:29:14,051 - INFO - Loaded 160224 entries from data/train.csv
+2026-04-18 13:29:14,174 - INFO - Data: 13463 positive, 146761 negative
+2026-04-18 13:29:14,174 - INFO - Loading validation data...
+2026-04-18 13:29:14,267 - INFO - Loaded 20839 entries from data/val.csv
+2026-04-18 13:29:14,279 - INFO - Data: 2699 positive, 18140 negative
+2026-04-18 13:29:14,281 - INFO - Using custom pos_weight: 15.0000 (auto-calculated would be: 10.9011)
+2026-04-18 13:29:14,354 - INFO - Model parameters: 5,515,265
+2026-04-18 13:29:14,355 - INFO - Using default enhanced architecture (CNN + Attention)
+2026-04-18 13:29:14,491 - INFO - Using pos_weight: 15.0000
+2026-04-18 13:29:14,492 - INFO - Using label smoothing: 0.1
+2026-04-18 13:29:16,685 - INFO - AECR loss enabled (lambda=0.1, sigma=3.0)
+2026-04-18 13:29:16,685 - INFO - Starting training for 100 epochs...
+2026-04-18 13:29:16,686 - INFO - Device: cuda
+2026-04-18 13:29:16,687 - INFO - AMP enabled: True
+2026-04-18 13:44:14,798 - INFO - Epoch 001/100 | Loss: 1.7602/1.5985 | Acc: 0.4181 | F1: 0.4023 | LR: 0.000050 | Time: 898.1s
+2026-04-18 13:44:14,994 - INFO -   -> Best model saved! (Metric: 0.5208)

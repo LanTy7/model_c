@@ -26,10 +26,10 @@ training:
   use_balanced_sampling: false
 
   # AECR regularization (enabled by default)
-  lambda_aecr: 0.1
+  lambda_aecr: 0.001
   aecr_sigma: 3.0
   aecr_lambda_ent: 1.0
-  aecr_lambda_loc: 0.5
+  aecr_lambda_loc: 0.0
 
 focal_loss:
   gamma: 1.0
