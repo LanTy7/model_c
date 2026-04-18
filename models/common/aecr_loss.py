@@ -119,15 +119,17 @@ class AECRLoss(nn.Module):
         gaussian_kernel = self._create_gaussian_kernel(seq_len, attention_weights.device)
 
         # Compute similarity between attention weights and Gaussian kernel
-        # Using einsum: for each batch and head, compute dot product
+        # For each query position, attention distribution should align with
+        # Gaussian kernel (local continuity). Per-row dot product ensures
+        # similarity is in [0,1] since both are probability distributions.
         # attention_weights: (batch, heads, seq_len, seq_len)
-        # gaussian_kernel: (seq_len, seq_len)
-        # Result: (batch, heads)
+        # gaussian_kernel: (seq_len, seq_len), row-normalized
         local_similarity = torch.einsum(
-            'bhij,ij->bh',
+            'bhij,ij->bhi',
             attention_weights,
             gaussian_kernel
-        )
+        )  # (batch, heads, seq_len), each value in [0,1]
+        local_similarity = local_similarity.mean(dim=-1)  # (batch, heads)
 
         # Loss is 1 - similarity (we want to maximize similarity)
         local_loss = 1.0 - local_similarity.mean()
