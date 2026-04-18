@@ -1,3 +1,4 @@
+import random
 from typing import List
 
 import torch
@@ -10,10 +11,11 @@ from utils.sequence_utils import one_hot_encode, sequence_to_indices
 class BinarySequenceDataset(Dataset):
     """Simple dataset for binary classification using embedding indices."""
 
-    def __init__(self, sequences: List[str], labels: List[int], max_length: int):
+    def __init__(self, sequences: List[str], labels: List[int], max_length: int, training: bool = False):
         self.sequences = sequences
         self.labels = labels
         self.max_length = max_length
+        self.training = training
 
     def __len__(self):
         return len(self.sequences)
@@ -21,6 +23,10 @@ class BinarySequenceDataset(Dataset):
     def __getitem__(self, idx):
         seq = self.sequences[idx]
         label = self.labels[idx]
+        # Random crop for training if sequence is too long (data augmentation)
+        if self.training and len(seq) > self.max_length:
+            start = random.randint(0, len(seq) - self.max_length)
+            seq = seq[start:start + self.max_length]
         encoded = sequence_to_indices(seq, self.max_length)
         return torch.from_numpy(encoded), torch.tensor(label, dtype=torch.float32)
 

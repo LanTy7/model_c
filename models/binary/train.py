@@ -19,6 +19,25 @@ from data.dataset import BinarySequenceDataset
 from utils.common import setup_logging, set_seed, load_config
 
 
+class LabelSmoothedBCEWithLogitsLoss(nn.Module):
+    """BCEWithLogitsLoss with label smoothing for binary classification.
+
+    Label smoothing prevents overconfidence by replacing hard labels
+    (0, 1) with soft targets (smoothing/2, 1 - smoothing/2).
+    """
+
+    def __init__(self, pos_weight=None, smoothing=0.0):
+        super().__init__()
+        self.smoothing = smoothing
+        self.bce = nn.BCEWithLogitsLoss(pos_weight=pos_weight, reduction='none')
+
+    def forward(self, inputs, targets):
+        # targets: 0 or 1
+        # smoothed: 0 -> smoothing/2, 1 -> 1 - smoothing/2
+        targets = targets * (1 - self.smoothing) + self.smoothing * 0.5
+        return self.bce(inputs, targets).mean()
+
+
 def load_data(csv_path: str, logger) -> Tuple[List[str], List[int]]:
     """Load data from CSV (sequence column)."""
     df = pd.read_csv(csv_path)
@@ -60,8 +79,8 @@ def create_dataloaders(config: dict, logger) -> Tuple[DataLoader, DataLoader, fl
         logger.info(f"Using auto-calculated pos_weight: {pos_weight:.4f}")
 
     # Create datasets
-    train_dataset = BinarySequenceDataset(train_seqs, train_labels, max_length)
-    val_dataset = BinarySequenceDataset(val_seqs, val_labels, max_length)
+    train_dataset = BinarySequenceDataset(train_seqs, train_labels, max_length, training=True)
+    val_dataset = BinarySequenceDataset(val_seqs, val_labels, max_length, training=False)
 
     # Create dataloaders
     train_loader = DataLoader(
@@ -111,10 +130,18 @@ def main(config_path: str):
     logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     logger.info("Using default enhanced architecture (CNN + Attention)")
 
-    # Loss function with pos_weight
+    # Loss function with pos_weight and optional label smoothing
     pos_weight_tensor = torch.tensor([pos_weight], dtype=torch.float32).to(device)
     logger.info(f"Using pos_weight: {pos_weight:.4f}")
-    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor)
+    label_smoothing = config['training'].get('label_smoothing', 0.0)
+    if label_smoothing > 0:
+        logger.info(f"Using label smoothing: {label_smoothing}")
+        criterion = LabelSmoothedBCEWithLogitsLoss(
+            pos_weight=pos_weight_tensor,
+            smoothing=label_smoothing
+        )
+    else:
+        criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor)
 
     # Optimizer
     optimizer = torch.optim.AdamW(
