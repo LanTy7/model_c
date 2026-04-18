@@ -8,7 +8,7 @@ model:
   hidden_size: 256
   num_layers: 3
   dropout: 0.5
-  max_length: 1000
+  max_length: 700
   num_attention_heads: 8
   attention_dropout: 0.1
   cnn_out_channels: 64
@@ -16,14 +16,14 @@ model:
 
 training:
   epochs: 100
-  batch_size: 64
+  batch_size: 128
   lr: 0.002
   weight_decay: 0.02
   patience: 15
   grad_clip: 1.0
   warmup_epochs: 5
   use_amp: true
-  accumulation_steps: 8
+  accumulation_steps: 4
   num_workers: 8
   label_smoothing: 0.1
 
