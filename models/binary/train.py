@@ -230,7 +230,17 @@ def main(config_path: str):
             pin_memory=True
         )
 
-        test_metrics = trainer.evaluate(test_loader, class_names=['non-ARG', 'ARG'])
+        # Load tuned threshold if available for more accurate test evaluation
+        threshold = 0.5
+        threshold_path = os.path.join(save_dir, 'threshold.json')
+        if os.path.exists(threshold_path):
+            import json
+            with open(threshold_path) as f:
+                threshold_data = json.load(f)
+                threshold = threshold_data.get('optimal_threshold', 0.5)
+            logger.info(f"Using tuned threshold: {threshold:.4f}")
+
+        test_metrics = trainer.evaluate(test_loader, class_names=['non-ARG', 'ARG'], threshold=threshold)
 
         # Log test metrics
         from utils.metrics import format_metrics_for_display

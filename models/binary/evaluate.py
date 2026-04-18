@@ -311,15 +311,17 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     # Save threshold to checkpoint directory for later use by predict.py
-    checkpoint_dir = os.path.dirname(os.path.abspath(args.checkpoint))
-    threshold_path = os.path.join(checkpoint_dir, 'threshold.json')
-    save_threshold_json(
-        threshold_path,
-        optimal_threshold=eval_threshold,
-        tune_metric=args.tune_metric if args.tune_threshold else "manual",
-        description=f"Threshold {'optimized for ' + args.tune_metric.upper() + ' score on validation set' if args.tune_threshold else 'set manually'}"
-    )
-    logger.info(f"Threshold saved to: {threshold_path}")
+    # Only save when threshold was actually tuned, to avoid overwriting a tuned value
+    if args.tune_threshold:
+        checkpoint_dir = os.path.dirname(os.path.abspath(args.checkpoint))
+        threshold_path = os.path.join(checkpoint_dir, 'threshold.json')
+        save_threshold_json(
+            threshold_path,
+            optimal_threshold=eval_threshold,
+            tune_metric=args.tune_metric,
+            description=f"Threshold optimized for {args.tune_metric.upper()} score on validation set"
+        )
+        logger.info(f"Threshold saved to: {threshold_path}")
 
     # Save metrics as JSON
     metrics_path = os.path.join(args.output_dir, 'test_metrics.json')

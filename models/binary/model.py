@@ -92,11 +92,14 @@ class BinaryARGClassifier(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
+        mask: torch.Tensor = None,
         return_attention: bool = False
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Args:
             x: Input indices (batch, seq_len)
+            mask: Optional padding mask (batch, seq_len), True for valid positions.
+                  If None, inferred from x != 0.
             return_attention: Whether to return attention weights (only if use_attention=True)
 
         Returns:
@@ -107,7 +110,8 @@ class BinaryARGClassifier(nn.Module):
         emb = self.embedding(x)  # (batch, seq_len, embedding_dim)
 
         # Create mask for padding positions
-        mask = (x != 0)  # (batch, seq_len), True for valid positions
+        if mask is None:
+            mask = (x != 0)  # (batch, seq_len), True for valid positions
 
         # Multi-scale CNN preprocessing
         features = self.cnn(emb, mask)  # (batch, seq_len, cnn_output_dim)
@@ -137,10 +141,11 @@ class BinaryARGClassifier(nn.Module):
             logits = logits[0]
         return torch.sigmoid(logits)
 
-    def get_embeddings(self, x: torch.Tensor) -> torch.Tensor:
+    def get_embeddings(self, x: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
         """Get sequence embeddings before classification."""
         emb = self.embedding(x)
-        mask = (x != 0)
+        if mask is None:
+            mask = (x != 0)
 
         # Multi-scale CNN preprocessing
         features = self.cnn(emb, mask)

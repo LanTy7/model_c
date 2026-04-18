@@ -1,6 +1,7 @@
 """Shared BiLSTM backbone and pooling layers."""
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 from typing import Union, Tuple
@@ -79,7 +80,28 @@ class BiLSTMAttentionBackbone(nn.Module):
             If return_attention=True and use_attention=True: (output, attention_weights)
         """
         # BiLSTM encoding
-        output, _ = self.lstm(x)
+        if mask is not None:
+            lengths = mask.sum(dim=1).cpu()
+            # Use pack_padded_sequence for efficient variable-length processing
+            if lengths.min() > 0:
+                lengths_sorted, sort_idx = lengths.sort(descending=True)
+                x_sorted = x[sort_idx]
+                packed = nn.utils.rnn.pack_padded_sequence(
+                    x_sorted, lengths_sorted, batch_first=True
+                )
+                packed_output, _ = self.lstm(packed)
+                output, _ = nn.utils.rnn.pad_packed_sequence(packed_output, batch_first=True)
+                # Unsort back to original order
+                _, unsort_idx = sort_idx.sort()
+                output = output[unsort_idx]
+                # Pad to original max_length if needed
+                if output.shape[1] < x.shape[1]:
+                    pad_size = x.shape[1] - output.shape[1]
+                    output = F.pad(output, (0, 0, 0, pad_size))
+            else:
+                output, _ = self.lstm(x)
+        else:
+            output, _ = self.lstm(x)
 
         # Apply mask if provided (for variable length sequences)
         if mask is not None:
@@ -91,6 +113,9 @@ class BiLSTMAttentionBackbone(nn.Module):
         attention_weights = None
         if self.use_attention:
             output, attention_weights = self.attention(output, mask)
+            # Re-mask padding positions after attention to prevent contamination
+            if mask is not None:
+                output = output.masked_fill(~mask.unsqueeze(-1), 0.0)
 
         if return_attention and attention_weights is not None:
             return output, attention_weights

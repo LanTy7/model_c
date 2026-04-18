@@ -177,7 +177,6 @@ class Trainer:
         total_loss = 0.0
         total_task_loss = 0.0
         total_aecr_loss = 0.0
-        num_batches = 0
 
         # Collect predictions and targets for training metrics
         all_preds = []
@@ -187,7 +186,16 @@ class Trainer:
         # Check if model uses attention
         model_uses_attention = getattr(self.model, 'use_attention', False)
 
-        for batch_idx, (inputs, targets) in enumerate(train_loader):
+        num_batches = len(train_loader)
+        for batch_idx, batch in enumerate(train_loader):
+            # Support both 2-tuple (inputs, targets) and 3-tuple (inputs, mask, targets)
+            if len(batch) == 3:
+                inputs, mask, targets = batch
+                mask = mask.to(self.config.device)
+            else:
+                inputs, targets = batch
+                mask = None
+
             inputs = inputs.to(self.config.device)
             targets = targets.to(self.config.device)
 
@@ -196,9 +204,15 @@ class Trainer:
                 with autocast():
                     # Forward pass (with attention if model supports it)
                     if model_uses_attention:
-                        outputs, attention_weights = self.model(inputs, return_attention=True)
+                        if mask is not None:
+                            outputs, attention_weights = self.model(inputs, mask=mask, return_attention=True)
+                        else:
+                            outputs, attention_weights = self.model(inputs, return_attention=True)
                     else:
-                        outputs = self.model(inputs)
+                        if mask is not None:
+                            outputs = self.model(inputs, mask=mask)
+                        else:
+                            outputs = self.model(inputs)
                         attention_weights = None
 
                     # Determine binary vs multi-class before squeezing
@@ -222,9 +236,15 @@ class Trainer:
             else:
                 # Forward pass (with attention if model supports it)
                 if model_uses_attention:
-                    outputs, attention_weights = self.model(inputs, return_attention=True)
+                    if mask is not None:
+                        outputs, attention_weights = self.model(inputs, mask=mask, return_attention=True)
+                    else:
+                        outputs, attention_weights = self.model(inputs, return_attention=True)
                 else:
-                    outputs = self.model(inputs)
+                    if mask is not None:
+                        outputs = self.model(inputs, mask=mask)
+                    else:
+                        outputs = self.model(inputs)
                     attention_weights = None
 
                 # Determine binary vs multi-class before squeezing
@@ -252,8 +272,9 @@ class Trainer:
             else:
                 loss.backward()
 
-            # Gradient accumulation
-            if (batch_idx + 1) % self.config.accumulation_steps == 0:
+            # Gradient accumulation: step on full groups and on the last batch
+            is_last_batch = (batch_idx + 1) == num_batches
+            if (batch_idx + 1) % self.config.accumulation_steps == 0 or is_last_batch:
                 if self.config.grad_clip > 0:
                     if self.config.use_amp:
                         self.scaler.unscale_(self.optimizer)
@@ -290,29 +311,6 @@ class Trainer:
             total_task_loss += task_loss.item()
             if isinstance(aecr_loss, torch.Tensor):
                 total_aecr_loss += aecr_loss.item()
-            num_batches += 1
-
-        # Apply any remaining accumulated gradients at end of epoch
-        remaining = num_batches % self.config.accumulation_steps
-        if remaining != 0:
-            if self.config.grad_clip > 0:
-                if self.config.use_amp:
-                    self.scaler.unscale_(self.optimizer)
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(),
-                    self.config.grad_clip
-                )
-
-            if self.config.use_amp:
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-            else:
-                self.optimizer.step()
-
-            self.optimizer.zero_grad()
-
-            if self.scheduler:
-                self.scheduler.step()
 
         avg_loss = total_loss / num_batches
 
@@ -346,30 +344,70 @@ class Trainer:
         all_targets = []
         all_probs = []
 
+        model_uses_attention = getattr(self.model, 'use_attention', False)
+
         with torch.no_grad():
-            for inputs, targets in val_loader:
+            for batch in val_loader:
+                # Support both 2-tuple and 3-tuple batches
+                if len(batch) == 3:
+                    inputs, mask, targets = batch
+                    mask = mask.to(self.config.device)
+                else:
+                    inputs, targets = batch
+                    mask = None
+
                 inputs = inputs.to(self.config.device)
                 targets = targets.to(self.config.device)
 
                 if self.config.use_amp:
                     with autocast():
-                        outputs = self.model(inputs)
+                        if model_uses_attention:
+                            outputs, attention_weights = self.model(inputs, mask=mask, return_attention=True)
+                        else:
+                            outputs = self.model(inputs, mask=mask)
+                            attention_weights = None
+
                         # Handle shape mismatch for binary classification
                         is_binary = outputs.dim() == 2 and outputs.shape[1] == 1 and targets.dim() == 1
                         if is_binary:
                             outputs_squeezed = outputs.squeeze(1)
-                            loss = self.criterion(outputs_squeezed, targets)
+                            task_loss = self.criterion(outputs_squeezed, targets)
                         else:
-                            loss = self.criterion(outputs, targets)
+                            task_loss = self.criterion(outputs, targets)
+
+                        # Add AECR loss for consistent train/val objective
+                        if self.aecr_criterion is not None and attention_weights is not None:
+                            aecr_loss = self.aecr_criterion(attention_weights) * self.config.lambda_aecr
+                            loss = task_loss + aecr_loss
+                        else:
+                            loss = task_loss
                 else:
-                    outputs = self.model(inputs)
+                    if model_uses_attention:
+                        if mask is not None:
+                            outputs, attention_weights = self.model(inputs, mask=mask, return_attention=True)
+                        else:
+                            outputs, attention_weights = self.model(inputs, return_attention=True)
+                    else:
+                        if mask is not None:
+                            outputs = self.model(inputs, mask=mask)
+                        else:
+                            outputs = self.model(inputs)
+                        attention_weights = None
+
                     # Handle shape mismatch for binary classification
                     is_binary = outputs.dim() == 2 and outputs.shape[1] == 1 and targets.dim() == 1
                     if is_binary:
                         outputs_squeezed = outputs.squeeze(1)
-                        loss = self.criterion(outputs_squeezed, targets)
+                        task_loss = self.criterion(outputs_squeezed, targets)
                     else:
-                        loss = self.criterion(outputs, targets)
+                        task_loss = self.criterion(outputs, targets)
+
+                    # Add AECR loss for consistent train/val objective
+                    if self.aecr_criterion is not None and attention_weights is not None:
+                        aecr_loss = self.aecr_criterion(attention_weights) * self.config.lambda_aecr
+                        loss = task_loss + aecr_loss
+                    else:
+                        loss = task_loss
 
                 total_loss += loss.item()
 
@@ -524,7 +562,8 @@ class Trainer:
     def evaluate(
         self,
         test_loader: DataLoader,
-        class_names: Optional[List[str]] = None
+        class_names: Optional[List[str]] = None,
+        threshold: float = 0.5
     ) -> Dict[str, Any]:
         """
         Comprehensive evaluation on test set.
@@ -532,6 +571,7 @@ class Trainer:
         Args:
             test_loader: Test data loader
             class_names: List of class names for visualization
+            threshold: Classification threshold for binary classification (default: 0.5)
 
         Returns:
             Dictionary containing all evaluation metrics
@@ -550,22 +590,36 @@ class Trainer:
         all_probs = []
 
         with torch.no_grad():
-            for inputs, targets in test_loader:
+            for batch in test_loader:
+                # Support both 2-tuple and 3-tuple batches
+                if len(batch) == 3:
+                    inputs, mask, targets = batch
+                    mask = mask.to(self.config.device)
+                else:
+                    inputs, targets = batch
+                    mask = None
+
                 inputs = inputs.to(self.config.device)
                 targets = targets.to(self.config.device)
 
                 if self.config.use_amp:
                     with autocast():
-                        outputs = self.model(inputs)
+                        if mask is not None:
+                            outputs = self.model(inputs, mask=mask)
+                        else:
+                            outputs = self.model(inputs)
                 else:
-                    outputs = self.model(inputs)
+                    if mask is not None:
+                        outputs = self.model(inputs, mask=mask)
+                    else:
+                        outputs = self.model(inputs)
 
                 # Get predictions and probabilities
                 is_binary = outputs.dim() == 2 and outputs.shape[1] == 1 and targets.dim() == 1
 
                 if is_binary:
                     probs = torch.sigmoid(outputs).cpu().numpy()
-                    preds = (probs > 0.5).astype(int)
+                    preds = (probs > threshold).astype(int)
                 else:
                     probs = torch.softmax(outputs, dim=1).cpu().numpy()
                     preds = np.argmax(probs, axis=1)
