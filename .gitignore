@@ -9,6 +9,7 @@ tasks/
 
 # Model-related
 data/
+checkpoints/binary/binary_best.pth
 
 # Unrelated files
 .claude/
