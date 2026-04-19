@@ -93,7 +93,7 @@ def load_model(checkpoint_path: str, device: str = 'cuda' if torch.cuda.is_avail
             'hidden_size': hidden_size,
             'num_layers': num_layers,
             'dropout': 0.4,
-            'max_length': 1000,
+            'max_length': 700,
             'use_cnn': use_cnn,
             'use_attention': use_attention,
             'cnn_kernel_sizes': [3, 5, 7] if use_cnn else None,

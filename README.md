@@ -15,7 +15,7 @@ Models use **BiLSTM + Self-Attention + Multi-scale CNN** architecture with modul
 
 ### 2. Class Imbalance Handling
 Real-world ARG prevalence is ~0.1-1%, but training data is 1:1 balanced. We implemented:
-- **Custom pos_weight**: Train with `pos_weight > 1` to emphasize positive class recall
+- **Custom pos_weight**: When NOT using Focal Loss, train with `pos_weight > 1` to emphasize positive class recall. With Focal Loss enabled (default), keep `pos_weight: 1` and tune `focal_alpha` instead.
 - **Threshold Tuning**: Use `models/binary/evaluate.py --tune-threshold` to auto-search optimal classification threshold (optimizing F1/F2) instead of fixed 0.5. Results are saved as `threshold_{metric}.json` (e.g., `threshold_f1.json`). Validation metrics during training still use 0.5.
 
 ### 3. Improved Data Pipeline
@@ -181,10 +181,11 @@ python models/multi/predict.py \
 ## Key Architecture Decisions
 
 ### Model Configuration
-- **Binary model**: Embedding (vocab_size=25) -> Multi-scale CNN -> BiLSTM + Self-Attention (hidden=128, 2 layers) -> FC. Inherits from `BaseARGClassifier` shared architecture.
+- **Binary model**: Embedding (vocab_size=25) -> Multi-scale CNN -> BiLSTM + Self-Attention (hidden=256, 3 layers) -> FC. Inherits from `BaseARGClassifier` shared architecture.
 - **Multi-class model**: One-hot (21 dims) -> Multi-scale CNN -> BiLSTM + Self-Attention (hidden=256, 3 layers) -> FC with Focal Loss. Inherits from `BaseARGClassifier` shared architecture.
 - **AECR**: Attention Entropy Regularization is applied during training by default
 - **Unified FocalLoss** (`models/common/losses.py`): Supports both binary and multi-class classification with a single implementation
+- **Architecture Auto-Inference**: `evaluate.py` and `predict.py` automatically infer `use_attention` and `use_cnn` from checkpoint state_dict when `model_config` is not available
 
 ### Data Processing
 - Amino acid vocabulary: 20 standard + X (unknown) + PAD
@@ -214,7 +215,7 @@ model:
   hidden_size: 256
   num_layers: 3
   dropout: 0.5
-  max_length: 700
+  max_length: 700         # Data preprocessing only, not passed to model constructor
   num_attention_heads: 8
   attention_dropout: 0.1
   cnn_out_channels: 64
@@ -296,9 +297,9 @@ The project uses a **two-stage homology-aware splitting strategy** adapted from 
 
 1. **Batch Size**: 256 works well for both tasks; reduce if OOM
 2. **Learning Rate**: 0.0005 is a good starting point; use warmup
-3. **Hidden Size**: Binary 128, Multi-class 256
-4. **Dropout**: 0.4 for both (higher if overfitting)
-5. **Num Layers**: Binary 2, Multi-class 3
+3. **Hidden Size**: Binary 256, Multi-class 256
+4. **Dropout**: 0.5 for binary, 0.4 for multi-class (higher if overfitting)
+5. **Num Layers**: Binary 3, Multi-class 3
 
 ## Troubleshooting
 

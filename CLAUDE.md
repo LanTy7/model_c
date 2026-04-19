@@ -78,8 +78,9 @@ python models/multi/predict.py \
 - **Enhanced Features**: Self-Attention, Multi-scale CNN, and AECR regularization are enabled by default in the standard configs
 - **Threshold Tuning**: Use `--tune-threshold` in evaluate.py for imbalanced data scenarios. Metric-specific threshold files (e.g., `threshold_f1.json`, `threshold_f2.json`) are saved to avoid silent overwrites; predict.py prefers them and falls back to `threshold.json`.
 - **Checkpoint Resume**: Checkpoints save optimizer and scheduler state. Use `trainer.load_checkpoint()` to resume training.
-- **Safe Loading**: Use `safe_torch_load()` from `utils.common` instead of raw `torch.load()` for secure checkpoint loading.
+- **Safe Loading**: Use `safe_torch_load()` from `utils.common` instead of raw `torch.load()` for secure checkpoint loading. Compatible with both PyTorch >= 2.0 and older versions.
 - **Base Model**: `BinaryARGClassifier` and `MultiClassARGClassifier` both inherit from `BaseARGClassifier` (`models/common/base_model.py`). Shared architecture includes CNN, BiLSTM, Attention, Pooling, and Classifier.
+- **Architecture Inference**: `evaluate.py` and `predict.py` automatically infer `use_attention` and `use_cnn` from checkpoint state_dict when model_config is not available.
 
 ## Documentation Files
 

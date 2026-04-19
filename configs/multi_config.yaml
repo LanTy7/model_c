@@ -7,6 +7,8 @@ model:
   hidden_size: 256
   num_layers: 3
   dropout: 0.4
+  use_attention: true
+  use_cnn: true
   num_attention_heads: 8
   attention_dropout: 0.1
   cnn_out_channels: 64
