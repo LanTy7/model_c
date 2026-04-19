@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 from torch.cuda.amp import autocast, GradScaler
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
-    roc_auc_score, confusion_matrix
+    roc_auc_score, average_precision_score, confusion_matrix
 )
 
 
@@ -446,16 +446,21 @@ class Trainer:
         }
 
         # ROC-AUC for binary or multi-class
-        if probs.shape[1] == 1:  # Binary
+        if probs.ndim == 1 or probs.shape[1] == 1:  # Binary
             try:
                 metrics['auc'] = roc_auc_score(targets, probs)
             except ValueError:
                 metrics['auc'] = 0.0
+            try:
+                metrics['pr_auc'] = average_precision_score(targets, probs)
+            except ValueError:
+                metrics['pr_auc'] = 0.0
         else:  # Multi-class
             try:
                 metrics['auc'] = roc_auc_score(targets, probs, multi_class='ovr', average='macro')
             except ValueError:
                 metrics['auc'] = 0.0
+            metrics['pr_auc'] = 0.0
 
         return metrics
 

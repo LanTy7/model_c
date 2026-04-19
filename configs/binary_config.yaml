@@ -27,12 +27,17 @@ training:
   num_workers: 8
   label_smoothing: 0.1
 
-  # Class imbalance handling
-  # pos_weight: null means auto-calculate from data (n_neg / n_pos)
-  pos_weight: 15
+  # Loss function: Focal Loss (recommended for extreme imbalance)
+  use_focal_loss: true
+  focal_alpha: 0.75
+  focal_gamma: 2.0
 
-  # AECR regularization (enabled by default)
-  lambda_aecr: 0.001
+  # Class imbalance handling
+  # When using Focal Loss, pos_weight should be 1 (let focal loss balance classes)
+  pos_weight: 1
+
+  # AECR regularization (disabled by default — conflicts with sparse protein features)
+  lambda_aecr: 0.0
   aecr_sigma: 3.0
   aecr_lambda_ent: 1.0
   aecr_lambda_loc: 0.0
