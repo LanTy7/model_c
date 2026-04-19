@@ -23,7 +23,6 @@ python scripts/create_training_data.py \
   --positive-fasta data/ARG_DB.fasta \
   --negative-fasta data/Non_ARG_DB.fasta \
   --output-dir data \
-  --n-splits 5 \
   --seed 42
 ```
 
@@ -77,7 +76,7 @@ python models/multi/predict.py \
 - **Class Balancing**: Uses pos_weight (binary) and class_weights + unified FocalLoss (`models/common/losses.py`) for multi-class
 - **AMP**: Uses `torch.cuda.amp` (deprecated warnings are OK)
 - **Enhanced Features**: Self-Attention, Multi-scale CNN, and AECR regularization are enabled by default in the standard configs
-- **Threshold Tuning**: Use `--tune-threshold` in evaluate.py for imbalanced data scenarios
+- **Threshold Tuning**: Use `--tune-threshold` in evaluate.py for imbalanced data scenarios. Metric-specific threshold files (e.g., `threshold_f1.json`, `threshold_f2.json`) are saved to avoid silent overwrites; predict.py prefers them and falls back to `threshold.json`.
 - **Checkpoint Resume**: Checkpoints save optimizer and scheduler state. Use `trainer.load_checkpoint()` to resume training.
 - **Safe Loading**: Use `safe_torch_load()` from `utils.common` instead of raw `torch.load()` for secure checkpoint loading.
 - **Base Model**: `BinaryARGClassifier` and `MultiClassARGClassifier` both inherit from `BaseARGClassifier` (`models/common/base_model.py`). Shared architecture includes CNN, BiLSTM, Attention, Pooling, and Classifier.

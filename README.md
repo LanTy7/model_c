@@ -16,7 +16,7 @@ Models use **BiLSTM + Self-Attention + Multi-scale CNN** architecture with modul
 ### 2. Class Imbalance Handling
 Real-world ARG prevalence is ~0.1-1%, but training data is 1:1 balanced. We implemented:
 - **Custom pos_weight**: Train with `pos_weight > 1` to emphasize positive class recall
-- **Threshold Tuning**: Use `models/binary/evaluate.py --tune-threshold` to auto-search optimal classification threshold (optimizing F1/F2) instead of fixed 0.5. Validation metrics during training still use 0.5.
+- **Threshold Tuning**: Use `models/binary/evaluate.py --tune-threshold` to auto-search optimal classification threshold (optimizing F1/F2) instead of fixed 0.5. Results are saved as `threshold_{metric}.json` (e.g., `threshold_f1.json`). Validation metrics during training still use 0.5.
 
 ### 3. Improved Data Pipeline
 - **Two-Stage Homology-Aware Splitting**: Based on DefensePredictor (Science), uses MMseqs2 at 30% identity for redundancy reduction, followed by sensitive all-vs-all profile search + Louvain network clustering. Ensures distant homologs are kept together for rigorous generalization evaluation.
@@ -51,7 +51,7 @@ models/                       # Modular model implementations
     trainer.py              # Unified training framework (AMP, early stopping, AECR)
   binary/                    # Binary classification
     model.py                # BinaryARGClassifier (CNN + Attention + AECR)
-    train.py                # Training script (single-split and k-fold CV)
+    train.py                # Training script (evaluation and production training)
     evaluate.py             # Evaluation script with threshold tuning
     predict.py              # Inference script
   multi/                     # Multi-class classification
@@ -108,7 +108,6 @@ python scripts/create_training_data.py \
   --positive-fasta data/ARG_DB.fasta \
   --negative-fasta data/Non_ARG_DB.fasta \
   --output-dir data \
-  --n-splits 5 \
   --stage1-min-seq-id 0.30 \
   --stage2-num-iterations 3 \
   --seed 42
@@ -134,7 +133,7 @@ Trains a model on the train set, validates on the val set for early stopping and
 ```bash
 python models/binary/train.py --config configs/binary_config.yaml --mode final
 ```
-Trains a single production model on train+val combined (with internal 90/10 split for early stopping). Saved as `checkpoints/binary/binary_final.pth`. Uses the threshold tuned during Phase 1 for inference.
+Trains a single production model on train+val combined (with internal 90/10 split for early stopping). Saved as `checkpoints/binary/binary_final.pth`. Uses the metric-specific threshold (e.g., `threshold_f1.json`) tuned during Phase 1 for inference.
 
 **Multi-class Classification:**
 ```bash
@@ -237,7 +236,6 @@ training:
 
 data:
   data_dir: "data"
-  n_splits: 5
 ```
 
 ### Multi-class Config Example
