@@ -4,8 +4,6 @@ import os
 import sys
 import argparse
 from pathlib import Path
-from collections import Counter
-
 import numpy as np
 import pandas as pd
 import torch
@@ -14,10 +12,8 @@ from torch.utils.data import DataLoader
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from models.multi.model import MultiClassARGClassifier
-from models.common.trainer import TrainConfig
 from data.dataset import MultiClassARGDataset
-from utils.common import setup_logging, load_config
-from utils.sequence_utils import get_max_length
+from utils.common import setup_logging, load_config, safe_torch_load
 from utils.metrics import compute_comprehensive_metrics, format_metrics_for_display, generate_classification_report
 from utils.visualization import (
     plot_confusion_matrix, plot_per_class_metrics, plot_roc_curves, save_metrics_json
@@ -33,7 +29,7 @@ def load_model(checkpoint_path: str, metadata_path: str, yaml_config: dict, devi
         metadata = json.load(f)
 
     # Load checkpoint
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    checkpoint = safe_torch_load(checkpoint_path, map_location=device)
 
     # Get model config from YAML config
     num_classes = metadata['num_classes']

@@ -42,10 +42,12 @@ configs/                      # YAML configuration files
 
 models/                       # Modular model implementations
   common/                    # Shared components
+    base_model.py           # BaseARGClassifier shared base class for binary/multi models
     bilstm.py               # BiLSTM backbone with self-attention
     attention.py            # Multi-head self-attention module
     multiscale_cnn.py       # Multi-scale CNN for local feature extraction
     aecr_loss.py            # AECR regularization loss
+    losses.py               # Unified FocalLoss supporting both binary and multiclass
     trainer.py              # Unified training framework (AMP, early stopping, AECR)
   binary/                    # Binary classification
     model.py                # BinaryARGClassifier (CNN + Attention + AECR)
@@ -60,7 +62,6 @@ models/                       # Modular model implementations
 
 scripts/                     # Data preparation and splitting
   create_training_data.py   # Two-stage homology-aware splitting (MMseqs2 + Louvain + GroupKFold)
-  prepare_training_negatives.py  # Negative sample preparation with filtering
 
 data/                        # Dataset storage
   fold_0/ .. fold_4/        # 5-fold CV splits (train.csv, val.csv, test.csv, .fasta)
@@ -185,9 +186,10 @@ python models/multi/predict.py \
 ## Key Architecture Decisions
 
 ### Model Configuration
-- **Binary model**: Embedding (vocab_size=25) -> Multi-scale CNN -> BiLSTM + Self-Attention (hidden=128, 2 layers) -> FC
-- **Multi-class model**: One-hot (21 dims) -> Multi-scale CNN -> BiLSTM + Self-Attention (hidden=256, 3 layers) -> FC with Focal Loss
+- **Binary model**: Embedding (vocab_size=25) -> Multi-scale CNN -> BiLSTM + Self-Attention (hidden=128, 2 layers) -> FC. Inherits from `BaseARGClassifier` shared architecture.
+- **Multi-class model**: One-hot (21 dims) -> Multi-scale CNN -> BiLSTM + Self-Attention (hidden=256, 3 layers) -> FC with Focal Loss. Inherits from `BaseARGClassifier` shared architecture.
 - **AECR**: Attention Entropy Regularization is applied during training by default
+- **Unified FocalLoss** (`models/common/losses.py`): Supports both binary and multi-class classification with a single implementation
 
 ### Data Processing
 - Amino acid vocabulary: 20 standard + X (unknown) + PAD
@@ -200,7 +202,7 @@ python models/multi/predict.py \
 - **Cosine Warmup**: Learning rate scheduling
 - **Early Stopping**: Based on validation metric
 - **Gradient Clipping**: Max norm = 1.0
-- **Class Balancing**: pos_weight for binary, class_weights + FocalLoss for multi-class
+- **Class Balancing**: pos_weight for binary, class_weights + unified FocalLoss for multi-class
 
 ### Label Management (Multi-class)
 - Categories extracted from `arg_category` column in CSV
@@ -326,11 +328,12 @@ The project uses a **two-stage homology-aware splitting strategy** adapted from 
 2. **Data Splitting**: Two-stage homology-aware splitting (MMseqs2 + Louvain) replaces old CD-HIT method. Homologous families never cross splits.
 3. **K-Fold CV**: Use `--mode kfold` to run 5-fold cross-validation. Each model trains on 4 folds and tests on 1 held-out fold. Reports averaged test metrics for unbiased performance estimation.
 4. **Production Model**: Use `--mode final` after hyperparameter selection to train on all data (`data/final/`). The 5-fold CV average test metrics are your reported generalization performance.
-5. **Model Checkpointing**: Best model saved based on validation PR-AUC (binary) or macro F1 (multi-class)
+5. **Model Checkpointing**: Best model saved based on validation PR-AUC (binary) or macro F1 (multi-class). Checkpoints also save optimizer and scheduler state for resumability.
 6. **Random Seeds**: Fixed seed (42) used for reproducibility in training scripts
 7. **Multi-class Labels**: Must handle "Others" category carefully; label mapping saved in metadata.json
 8. **Mixed Precision**: Uses `torch.cuda.amp` (deprecated warnings are OK)
 9. **Default Architecture**: Self-Attention, Multi-scale CNN, and AECR regularization are enabled by default in both binary and multi-class configs
+10. **Secure Checkpoint Loading**: `utils/common.py` provides `safe_torch_load` for robust and secure checkpoint loading
 
 ## Documentation Files
 

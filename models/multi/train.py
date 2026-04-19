@@ -9,12 +9,12 @@ from collections import Counter
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from models.multi.model import MultiClassARGClassifier, FocalLoss
+from models.multi.model import MultiClassARGClassifier
+from models.common.losses import FocalLoss
 from models.common.trainer import Trainer, TrainConfig, get_cosine_schedule_with_warmup
 from data.dataset import MultiClassARGDataset
 from utils.common import setup_logging, set_seed, load_config
@@ -186,6 +186,7 @@ def main(config_path: str):
 
     # Loss function
     criterion = FocalLoss(
+        task_type='multiclass',
         alpha=class_weights,
         gamma=config['focal_loss']['gamma'],
         label_smoothing=config['focal_loss']['label_smoothing']

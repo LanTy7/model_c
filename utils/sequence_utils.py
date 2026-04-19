@@ -1,7 +1,7 @@
 """Sequence encoding and preprocessing utilities."""
 import numpy as np
 import torch
-from typing import Union, List
+from typing import List
 
 # Amino acid vocabulary
 AMINO_ACIDS = 'ACDEFGHIKLMNPQRSTVWY'
@@ -82,12 +82,11 @@ def sequence_to_indices(sequence: str, max_length: int) -> np.ndarray:
         start = (len(sequence) - max_length) // 2
         sequence = sequence[start:start + max_length]
 
-    indices = [AA_DICT_EMBED.get(aa.upper(), 21) for aa in sequence]
-
-    if len(indices) < max_length:   # Pad
-        indices += [0] * (max_length - len(indices))
-
-    return np.array(indices, dtype=np.int64)
+    indices = np.zeros(max_length, dtype=np.int64)
+    seq_len = min(len(sequence), max_length)
+    for i in range(seq_len):
+        indices[i] = AA_DICT_EMBED.get(sequence[i].upper(), 21)
+    return indices
 
 
 def compute_class_weights(class_counts: np.ndarray, method: str = 'sqrt') -> torch.Tensor:

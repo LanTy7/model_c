@@ -15,9 +15,8 @@ from torch.utils.data import DataLoader
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from models.binary.model import BinaryARGClassifier
-from models.common.trainer import TrainConfig
 from data.dataset import BinarySequenceDataset
-from utils.common import setup_logging, load_config
+from utils.common import setup_logging, load_config, safe_torch_load
 from utils.metrics import (
     compute_comprehensive_metrics, format_metrics_for_display,
     generate_classification_report, find_optimal_threshold, compute_metrics_at_threshold
@@ -71,10 +70,7 @@ def load_data(csv_path: str, logger) -> Tuple[List[str], List[int]]:
 
 def load_model(checkpoint_path: str, config: dict, device: str) -> Tuple[BinaryARGClassifier, dict]:
     """Load model from checkpoint."""
-    try:
-        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
-    except (TypeError, RuntimeError):
-        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    checkpoint = safe_torch_load(checkpoint_path, map_location=device)
 
     # Determine model_config: priority: checkpoint > YAML config > state dict inference
     if 'model_config' in checkpoint:

@@ -37,3 +37,15 @@ def load_config(config_path: str) -> dict:
     """Load YAML configuration."""
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
+
+
+def safe_torch_load(path: str, map_location='cpu'):
+    """Load torch checkpoint safely with weights_only=True when possible."""
+    import torch
+    from models.common.trainer import TrainConfig
+    try:
+        torch.serialization.add_safe_globals([TrainConfig])
+        return torch.load(path, map_location=map_location, weights_only=True)
+    except Exception:
+        # Fallback for older checkpoints or other unpicklable objects
+        return torch.load(path, map_location=map_location, weights_only=False)

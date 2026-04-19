@@ -78,10 +78,13 @@ python models/multi/predict.py \
 - **K-Fold CV**: Binary training uses `--mode kfold` for 5-fold cross-validation. Checkpoints saved per fold in `checkpoints/binary/fold_{i}/`. Reports averaged test metrics for unbiased performance estimation.
 - **Production Model**: After hyperparameter selection, train final model with `--mode final` on all data (`data/final/`). Saved as `checkpoints/binary/binary_final.pth`.
 - **Multi-class Labels**: Label mapping saved in metadata.json for inference consistency
-- **Class Balancing**: Uses pos_weight (binary) and FocalLoss (multi-class)
+- **Class Balancing**: Uses pos_weight (binary) and class_weights + unified FocalLoss (`models/common/losses.py`) for multi-class
 - **AMP**: Uses `torch.cuda.amp` (deprecated warnings are OK)
 - **Enhanced Features**: Self-Attention, Multi-scale CNN, and AECR regularization are enabled by default in the standard configs
 - **Threshold Tuning**: Use `--tune-threshold` in evaluate.py for imbalanced data scenarios
+- **Checkpoint Resume**: Checkpoints save optimizer and scheduler state. Use `trainer.load_checkpoint()` to resume training.
+- **Safe Loading**: Use `safe_torch_load()` from `utils.common` instead of raw `torch.load()` for secure checkpoint loading.
+- **Base Model**: `BinaryARGClassifier` and `MultiClassARGClassifier` both inherit from `BaseARGClassifier` (`models/common/base_model.py`). Shared architecture includes CNN, BiLSTM, Attention, Pooling, and Classifier.
 
 ## Documentation Files
 

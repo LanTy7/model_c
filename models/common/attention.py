@@ -94,9 +94,9 @@ class SelfAttention(nn.Module):
         if mask is not None:
             # mask: (batch, seq_len) -> (batch, 1, 1, seq_len)
             # This masks out attention TO padding positions
-            mask = mask.unsqueeze(1).unsqueeze(2)
+            mask_kv = mask.unsqueeze(1).unsqueeze(2)
             # Use -1e4 instead of -inf for FP16 compatibility
-            attn_scores = attn_scores.masked_fill(~mask, -1e4)
+            attn_scores = attn_scores.masked_fill(~mask_kv, -1e4)
 
         # Softmax over the last dimension (attention weights sum to 1)
         attn_weights = F.softmax(attn_scores, dim=-1)
@@ -107,9 +107,14 @@ class SelfAttention(nn.Module):
         # -> (batch, num_heads, seq_len, head_dim)
         attn_output = torch.matmul(attn_weights, V)
 
+        if mask is not None:
+            # Mask query positions: padding queries should produce zero output
+            mask_q = mask.unsqueeze(1).unsqueeze(-1)  # (batch, 1, seq_len, 1)
+            attn_output = attn_output.masked_fill(~mask_q, 0.0)
+
         # Concatenate heads: (batch, num_heads, seq_len, head_dim)
         # -> (batch, seq_len, num_heads, head_dim) -> (batch, seq_len, hidden_dim)
-        attn_output = attn_output.transpose(1, 2).contiguous().view(
+        attn_output = attn_output.transpose(1, 2).reshape(
             batch_size, seq_len, self.hidden_dim
         )
 

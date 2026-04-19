@@ -15,7 +15,6 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -23,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from models.binary.model import BinaryARGClassifier
 from models.common.trainer import Trainer, TrainConfig, get_cosine_schedule_with_warmup
 from data.dataset import BinarySequenceDataset
-from utils.common import setup_logging, set_seed, load_config
+from utils.common import setup_logging, set_seed, load_config, safe_torch_load
 from utils.metrics import find_optimal_threshold
 
 
@@ -48,47 +47,7 @@ class LabelSmoothedBCEWithLogitsLoss(nn.Module):
         return self.bce(inputs, targets).mean()
 
 
-class BinaryFocalLoss(nn.Module):
-    """Focal Loss for binary classification.
-
-    Down-weights easy examples and focuses on hard negatives/positives.
-    Better than pos_weighted BCE for extreme imbalance.
-
-    Reference: Lin et al. "Focal Loss for Dense Object Detection" ICCV 2017
-    """
-
-    def __init__(self, alpha: float = 0.25, gamma: float = 2.0, pos_weight=None, label_smoothing: float = 0.0):
-        super().__init__()
-        self.alpha = alpha
-        self.gamma = gamma
-        self.pos_weight = pos_weight
-        self.label_smoothing = label_smoothing
-
-    def forward(self, inputs, targets):
-        # inputs: logits, shape (batch,) or (batch, 1)
-        # targets: 0 or 1, shape (batch,) or (batch, 1)
-        if targets.dim() == 1 and inputs.dim() == 2:
-            targets = targets.unsqueeze(1).float()
-        else:
-            targets = targets.float()
-
-        # Label smoothing
-        if self.label_smoothing > 0:
-            targets = targets * (1 - self.label_smoothing) + self.label_smoothing * 0.5
-
-        # BCE with logits (no reduction)
-        bce_loss = F.binary_cross_entropy_with_logits(
-            inputs, targets, pos_weight=self.pos_weight, reduction='none'
-        )
-
-        # p_t: probability of correct class
-        probs = torch.sigmoid(inputs)
-        p_t = probs * targets + (1 - probs) * (1 - targets)
-
-        # Focal weight
-        focal_weight = self.alpha * (1 - p_t) ** self.gamma
-
-        return (focal_weight * bce_loss).mean()
+from models.common.losses import FocalLoss
 
 
 def load_data(csv_path: str, logger=None) -> Tuple[List[str], List[int]]:
@@ -217,7 +176,8 @@ def train_single_fold(
     if use_focal:
         focal_alpha = config['training'].get('focal_alpha', 0.25)
         focal_gamma = config['training'].get('focal_gamma', 2.0)
-        criterion = BinaryFocalLoss(
+        criterion = FocalLoss(
+            task_type='binary',
             alpha=focal_alpha,
             gamma=focal_gamma,
             pos_weight=pos_weight_tensor,
@@ -494,7 +454,7 @@ def evaluate_novelty_test(
         # Load model
         model_config = {k: v for k, v in config['model'].items() if k != 'name'}
         model = BinaryARGClassifier(**model_config)
-        checkpoint = torch.load(model_path, map_location=device)
+        checkpoint = safe_torch_load(model_path, map_location=device)
         if 'model_state_dict' in checkpoint:
             model.load_state_dict(checkpoint['model_state_dict'])
         else:

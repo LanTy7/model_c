@@ -15,6 +15,7 @@ from Bio import SeqIO
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from models.binary.model import BinaryARGClassifier
+from utils.common import safe_torch_load
 from utils.sequence_utils import sequence_to_indices
 
 
@@ -50,12 +51,9 @@ def load_threshold_from_file(checkpoint_dir: str) -> tuple:
         return None, None
 
 
-def load_model(checkpoint_path: str, device: str = 'cuda'):
+def load_model(checkpoint_path: str, device: str = 'cuda' if torch.cuda.is_available() else 'cpu'):
     """Load trained model from checkpoint."""
-    try:
-        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
-    except (TypeError, RuntimeError):
-        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    checkpoint = safe_torch_load(checkpoint_path, map_location=device)
 
     # Get model config from checkpoint
     if 'model_config' in checkpoint:
@@ -148,7 +146,7 @@ def main():
     parser.add_argument('--model', '-m', required=True, help='Model checkpoint path (or directory for ensemble)')
     parser.add_argument('--models', nargs='+', help='Multiple model checkpoint paths for ensemble inference')
     parser.add_argument('--output', '-o', required=True, help='Output CSV path')
-    parser.add_argument('--device', '-d', default='cuda', help='Device (cuda/cpu)')
+    parser.add_argument('--device', '-d', default='cuda' if torch.cuda.is_available() else 'cpu', help='Device (cuda/cpu)')
     parser.add_argument('--batch-size', '-b', type=int, default=256, help='Batch size')
     parser.add_argument('--threshold', '-t', type=float, default=None,
                         help='Classification threshold (overrides threshold.json if provided)')

@@ -1,13 +1,11 @@
 """Binary classification model for ARG identification."""
 import torch
-from typing import Union, Tuple
 import torch.nn as nn
-from models.common.bilstm import (
-    BiLSTMBackbone, BiLSTMAttentionBackbone, GlobalPooling, ClassifierHead
-)
+
+from models.common.base_model import BaseARGClassifier
 
 
-class BinaryARGClassifier(nn.Module):
+class BinaryARGClassifier(BaseARGClassifier):
     """
     BiLSTM-based binary classifier for ARG vs non-ARG.
     Uses embedding layer for input encoding.
@@ -45,9 +43,23 @@ class BinaryARGClassifier(nn.Module):
             cnn_out_channels: Output channels per CNN kernel size
             cnn_kernel_sizes: List of CNN kernel sizes (default: [3, 5, 7])
         """
-        super().__init__()
-        self.use_attention = use_attention
-        self.use_cnn = use_cnn
+        self.vocab_size = vocab_size
+        self.embedding_dim = embedding_dim
+        self.max_length = max_length
+
+        super().__init__(
+            encoder_output_dim=embedding_dim,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout,
+            num_classes=1,
+            use_attention=use_attention,
+            num_attention_heads=num_attention_heads,
+            attention_dropout=attention_dropout,
+            use_cnn=use_cnn,
+            cnn_out_channels=cnn_out_channels,
+            cnn_kernel_sizes=cnn_kernel_sizes
+        )
 
         self.embedding = nn.Embedding(
             num_embeddings=vocab_size,
@@ -55,91 +67,13 @@ class BinaryARGClassifier(nn.Module):
             padding_idx=0  # PAD token index
         )
 
-        # Multi-scale CNN (optional)
-        if self.use_cnn:
-            from models.common.multiscale_cnn import MultiScaleCNN
-            self.cnn = MultiScaleCNN(
-                input_dim=embedding_dim,
-                out_channels=cnn_out_channels,
-                kernel_sizes=cnn_kernel_sizes,
-                dropout=dropout
-            )
-            lstm_input_size = self.cnn.output_dim
-        else:
-            self.cnn = None
-            lstm_input_size = embedding_dim
+    def _encode_input(self, x: torch.Tensor) -> torch.Tensor:
+        """Embed input indices into dense vectors."""
+        return self.embedding(x)  # (batch, seq_len, embedding_dim)
 
-        # Backbone always uses attention by default
-        self.backbone = BiLSTMAttentionBackbone(
-            input_size=lstm_input_size,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            dropout=dropout,
-            bidirectional=True,
-            use_attention=use_attention,
-            num_attention_heads=num_attention_heads,
-            attention_dropout=attention_dropout
-        )
-
-        self.pooling = GlobalPooling(pooling_type='both')
-
-        # Output size from backbone * 2 (max + mean pooling)
-        classifier_input = self.backbone.output_size * 2
-
-        self.classifier = ClassifierHead(
-            input_size=classifier_input,
-            hidden_size=hidden_size,
-            num_classes=1,  # Binary classification
-            dropout=dropout
-        )
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        mask: torch.Tensor = None,
-        return_attention: bool = False
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        """
-        Args:
-            x: Input indices (batch, seq_len)
-            mask: Optional padding mask (batch, seq_len), True for valid positions.
-                  If None, inferred from x != 0.
-            return_attention: Whether to return attention weights (only if use_attention=True)
-
-        Returns:
-            If return_attention=False: Logits (batch, 1)
-            If return_attention=True and use_attention=True: (logits, attention_weights)
-        """
-        # Embedding
-        emb = self.embedding(x)  # (batch, seq_len, embedding_dim)
-
-        # Create mask for padding positions
-        if mask is None:
-            mask = (x != 0)  # (batch, seq_len), True for valid positions
-
-        # Multi-scale CNN preprocessing (optional)
-        if self.use_cnn:
-            features = self.cnn(emb, mask)  # (batch, seq_len, cnn_output_dim)
-        else:
-            features = emb
-
-        # BiLSTM + Attention
-        backbone_out = self.backbone(features, mask, return_attention=return_attention)
-        if return_attention:
-            lstm_out, attention_weights = backbone_out
-        else:
-            lstm_out = backbone_out
-            attention_weights = None
-
-        # Global pooling
-        features = self.pooling(lstm_out, mask)  # (batch, hidden*4)
-
-        # Classifier
-        logits = self.classifier(features)  # (batch, 1)
-
-        if return_attention and attention_weights is not None:
-            return logits, attention_weights
-        return logits
+    def _create_mask(self, x: torch.Tensor) -> torch.Tensor:
+        """Create mask from embedding indices."""
+        return x != 0  # (batch, seq_len), True for valid positions
 
     def predict_proba(self, x: torch.Tensor) -> torch.Tensor:
         """Get probability predictions."""
@@ -147,16 +81,3 @@ class BinaryARGClassifier(nn.Module):
         if isinstance(logits, tuple):
             logits = logits[0]
         return torch.sigmoid(logits)
-
-    def get_embeddings(self, x: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
-        """Get sequence embeddings before classification."""
-        emb = self.embedding(x)
-        if mask is None:
-            mask = (x != 0)
-
-        # Multi-scale CNN preprocessing
-        features = self.cnn(emb, mask)
-
-        # BiLSTM + Attention
-        lstm_out = self.backbone(features, mask, return_attention=False)
-        return self.pooling(lstm_out, mask)

@@ -1,3 +1,3 @@
-from .model import MultiClassARGClassifier, FocalLoss
+from .model import MultiClassARGClassifier
 
-__all__ = ['MultiClassARGClassifier', 'FocalLoss']
+__all__ = ['MultiClassARGClassifier']

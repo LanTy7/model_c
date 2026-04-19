@@ -14,12 +14,13 @@ from Bio import SeqIO
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from models.multi.model import MultiClassARGClassifier
+from utils.common import safe_torch_load
 from utils.sequence_utils import one_hot_encode
 
 
-def load_model(checkpoint_path: str, metadata_path: str = None, device: str = 'cuda'):
+def load_model(checkpoint_path: str, metadata_path: str = None, device: str = 'cuda' if torch.cuda.is_available() else 'cpu'):
     """Load trained model from checkpoint."""
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    checkpoint = safe_torch_load(checkpoint_path, map_location=device)
 
     # Load metadata if available
     if metadata_path and os.path.exists(metadata_path):
@@ -94,7 +95,7 @@ def main():
     parser.add_argument('--model', '-m', required=True, help='Model checkpoint path')
     parser.add_argument('--metadata', '-md', help='Metadata JSON path (optional)')
     parser.add_argument('--output', '-o', required=True, help='Output CSV path')
-    parser.add_argument('--device', '-d', default='cuda', help='Device (cuda/cpu)')
+    parser.add_argument('--device', '-d', default='cuda' if torch.cuda.is_available() else 'cpu', help='Device (cuda/cpu)')
     parser.add_argument('--batch-size', '-b', type=int, default=256, help='Batch size')
 
     args = parser.parse_args()

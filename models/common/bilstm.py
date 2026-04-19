@@ -82,24 +82,21 @@ class BiLSTMAttentionBackbone(nn.Module):
         # BiLSTM encoding
         if mask is not None:
             lengths = mask.sum(dim=1).cpu()
-            # Use pack_padded_sequence for efficient variable-length processing
-            if lengths.min() > 0:
-                lengths_sorted, sort_idx = lengths.sort(descending=True)
-                x_sorted = x[sort_idx]
-                packed = nn.utils.rnn.pack_padded_sequence(
-                    x_sorted, lengths_sorted, batch_first=True
-                )
-                packed_output, _ = self.lstm(packed)
-                output, _ = nn.utils.rnn.pad_packed_sequence(packed_output, batch_first=True)
-                # Unsort back to original order
-                _, unsort_idx = sort_idx.sort()
-                output = output[unsort_idx]
-                # Pad to original max_length if needed
-                if output.shape[1] < x.shape[1]:
-                    pad_size = x.shape[1] - output.shape[1]
-                    output = F.pad(output, (0, 0, 0, pad_size))
-            else:
-                output, _ = self.lstm(x)
+            lengths_sorted, sort_idx = lengths.sort(descending=True)
+            lengths_sorted = lengths_sorted.clamp(min=1)
+            x_sorted = x[sort_idx]
+            packed = nn.utils.rnn.pack_padded_sequence(
+                x_sorted, lengths_sorted, batch_first=True
+            )
+            packed_output, _ = self.lstm(packed)
+            output, _ = nn.utils.rnn.pad_packed_sequence(packed_output, batch_first=True)
+            # Unsort back to original order
+            _, unsort_idx = sort_idx.sort()
+            output = output[unsort_idx]
+            # Pad to original max_length if needed
+            if output.shape[1] < x.shape[1]:
+                pad_size = x.shape[1] - output.shape[1]
+                output = F.pad(output, (0, 0, 0, pad_size))
         else:
             output, _ = self.lstm(x)
 
@@ -121,53 +118,6 @@ class BiLSTMAttentionBackbone(nn.Module):
             return output, attention_weights
 
         return output
-
-
-class BiLSTMBackbone(nn.Module):
-    """
-    Shared BiLSTM backbone for sequence encoding.
-    Can be used with either embedding or one-hot input.
-
-    Note: This is now a wrapper around BiLSTMAttentionBackbone for backward compatibility.
-    """
-
-    def __init__(
-        self,
-        input_size: int,
-        hidden_size: int = 128,
-        num_layers: int = 2,
-        dropout: float = 0.4,
-        bidirectional: bool = True
-    ):
-        """
-        Args:
-            input_size: Input feature dimension (embedding_dim or one-hot dim)
-            hidden_size: LSTM hidden size
-            num_layers: Number of LSTM layers
-            dropout: Dropout probability
-            bidirectional: Whether to use bidirectional LSTM
-        """
-        super().__init__()
-        self.backbone = BiLSTMAttentionBackbone(
-            input_size=input_size,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            dropout=dropout,
-            bidirectional=bidirectional,
-            use_attention=True
-        )
-        self.output_size = self.backbone.output_size
-
-    def forward(self, x: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
-        """
-        Args:
-            x: Input tensor (batch, seq_len, input_size)
-            mask: Optional mask tensor (batch, seq_len), True for valid positions
-
-        Returns:
-            LSTM output (batch, seq_len, hidden_size * num_directions)
-        """
-        return self.backbone(x, mask, return_attention=False)
 
 
 class GlobalPooling(nn.Module):
@@ -212,6 +162,7 @@ class GlobalPooling(nn.Module):
                 return torch.max(x_masked, dim=1)[0]
             elif self.pooling_type == 'mean':
                 sum_pool = (x * mask).sum(dim=1)
+                # clamp prevents division by zero; empty sequences will have mean = 0 due to sum being 0
                 denom = mask.sum(dim=1).clamp(min=1.0)
                 return sum_pool / denom
             else:  # both
@@ -221,6 +172,7 @@ class GlobalPooling(nn.Module):
 
                 # Mean pooling with mask
                 sum_pool = (x * mask).sum(dim=1)
+                # clamp prevents division by zero; empty sequences will have mean = 0 due to sum being 0
                 denom = mask.sum(dim=1).clamp(min=1.0)
                 mean_pool = sum_pool / denom
 

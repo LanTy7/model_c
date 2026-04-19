@@ -232,7 +232,12 @@ class Trainer:
 
                     # Total loss
                     raw_loss = task_loss + aecr_loss
-                    loss = raw_loss / self.config.accumulation_steps
+                    is_last_batch = (batch_idx + 1) == num_batches
+                    if is_last_batch and (batch_idx + 1) % self.config.accumulation_steps != 0:
+                        scale = (batch_idx + 1) % self.config.accumulation_steps
+                    else:
+                        scale = self.config.accumulation_steps
+                    loss = raw_loss / scale
             else:
                 # Forward pass (with attention if model supports it)
                 if model_uses_attention:
@@ -264,7 +269,12 @@ class Trainer:
 
                 # Total loss
                 raw_loss = task_loss + aecr_loss
-                loss = raw_loss / self.config.accumulation_steps
+                is_last_batch = (batch_idx + 1) == num_batches
+                if is_last_batch and (batch_idx + 1) % self.config.accumulation_steps != 0:
+                    scale = (batch_idx + 1) % self.config.accumulation_steps
+                else:
+                    scale = self.config.accumulation_steps
+                loss = raw_loss / scale
 
             # Backward pass
             if self.config.use_amp:
@@ -273,7 +283,6 @@ class Trainer:
                 loss.backward()
 
             # Gradient accumulation: step on full groups and on the last batch
-            is_last_batch = (batch_idx + 1) == num_batches
             if (batch_idx + 1) % self.config.accumulation_steps == 0 or is_last_batch:
                 if self.config.grad_clip > 0:
                     if self.config.use_amp:
@@ -375,12 +384,7 @@ class Trainer:
                         else:
                             task_loss = self.criterion(outputs, targets)
 
-                        # Add AECR loss for consistent train/val objective
-                        if self.aecr_criterion is not None and attention_weights is not None:
-                            aecr_loss = self.aecr_criterion(attention_weights) * self.config.lambda_aecr
-                            loss = task_loss + aecr_loss
-                        else:
-                            loss = task_loss
+                        loss = task_loss
                 else:
                     if model_uses_attention:
                         if mask is not None:
@@ -402,12 +406,7 @@ class Trainer:
                     else:
                         task_loss = self.criterion(outputs, targets)
 
-                    # Add AECR loss for consistent train/val objective
-                    if self.aecr_criterion is not None and attention_weights is not None:
-                        aecr_loss = self.aecr_criterion(attention_weights) * self.config.lambda_aecr
-                        loss = task_loss + aecr_loss
-                    else:
-                        loss = task_loss
+                    loss = task_loss
 
                 total_loss += loss.item()
 
@@ -668,6 +667,7 @@ class Trainer:
             'epoch': epoch,
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
+            'scheduler_state_dict': self.scheduler.state_dict() if self.scheduler else None,
             'metrics': metrics,
             'config': self.config,
             'model_config': self.model_config
@@ -677,11 +677,16 @@ class Trainer:
     def load_checkpoint(self, path: str) -> Dict:
         """Load model checkpoint."""
         try:
+            torch.serialization.add_safe_globals([TrainConfig])
             checkpoint = torch.load(path, map_location=self.config.device, weights_only=True)
         except (TypeError, RuntimeError):
             # Fallback for older PyTorch or checkpoints with custom objects
             checkpoint = torch.load(path, map_location=self.config.device, weights_only=False)
         self.model.load_state_dict(checkpoint['model_state_dict'])
+        if 'optimizer_state_dict' in checkpoint:
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        if self.scheduler and 'scheduler_state_dict' in checkpoint and checkpoint['scheduler_state_dict'] is not None:
+            self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         return checkpoint
 
 
