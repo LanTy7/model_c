@@ -5,20 +5,19 @@ Based on DefensePredictor methodology (Science paper).
 Key improvements over original CD-HIT approach:
 1. MMseqs2 at 30% identity for redundancy reduction (Stage 1)
 2. Sensitive all-vs-all profile search + Louvain network clustering (Stage 2)
-3. 5-fold GroupKFold with family-level stratification
-   - Each model trains on 4 folds (split into train/val), tests on 1 held-out fold
+3. Single 80:10:10 train/val/test split at family level with rare category handling
    - Homologous families never cross splits
+   - Rare ARG categories (< 3 families) are extracted and split at sequence level
 4. Stratified balancing by (is_arg, category) to maintain class distribution
 
 Pipeline:
   Stage 1: MMseqs2 cluster at 30% identity / 80% coverage (redundancy removal)
   Stage 2: MMseqs2 all-vs-all search on cluster reps (--num-iterations 3, -s 7.5)
   Stage 3: Build homology network + Louvain clustering -> "families"
-  Stage 4: 5-fold GroupKFold on all families with stratified balancing
-           Each fold: test = 1 fold-group, train+val = remaining 4 fold-groups
-  Stage 5: Final train/val split (80/20) for production model training
-           Uses same family-level stratification as 5-fold
-  Output:  fold_0/..fold_4/ (train/val/test) + final/ (train/val) + stats.json
+  Stage 4: 80:10:10 train/val/test split with family-level stratification
+           Common categories: split at family level (homology constraint)
+           Rare categories: extracted and split at sequence level (coverage guarantee)
+  Output:  train.csv/val.csv/test.csv + training_data_stats.json
 """
 
 import argparse
@@ -363,22 +362,116 @@ def build_seq_to_family(
 
 
 # ---------------------------------------------------------------------------
-# Stage 4: 5-fold GroupKFold with stratified balancing
+# Stage 4: Train/Val/Test split with rare category handling
 # ---------------------------------------------------------------------------
+
+def identify_rare_categories(
+    family_to_sequences: Dict[int, List[Dict]],
+    min_families: int = 3
+) -> Set[str]:
+    """Identify ARG categories with fewer than min_families families."""
+    category_family_counts = Counter()
+    for fam_id, seqs in family_to_sequences.items():
+        arg_cats = set(s['category'] for s in seqs if s['is_arg'] == 1)
+        for cat in arg_cats:
+            category_family_counts[cat] += 1
+    rare_categories = {cat for cat, count in category_family_counts.items() if count < min_families}
+    return rare_categories
+
+
+def extract_rare_sequences(
+    family_to_sequences: Dict[int, List[Dict]],
+    rare_categories: Set[str]
+) -> Tuple[List[Dict], Dict[int, List[Dict]]]:
+    """
+    Extract rare-category sequences from families.
+    Returns (rare_pool, common_families) where common_families has rare seqs removed.
+    If a family has only rare-category sequences, it's fully consumed into rare_pool.
+    """
+    rare_pool = []
+    common_families = {}
+
+    for fam_id, seqs in family_to_sequences.items():
+        rare_seqs = [s for s in seqs if s['is_arg'] == 1 and s['category'] in rare_categories]
+        common_seqs = [s for s in seqs if s not in rare_seqs]
+
+        if rare_seqs:
+            rare_pool.extend(rare_seqs)
+        if common_seqs:
+            common_families[fam_id] = common_seqs
+
+    return rare_pool, common_families
+
+
+def sequence_level_stratified_split(
+    sequences: List[Dict],
+    ratios: List[float] = None,
+    seed: int = 42
+) -> Tuple[List[Dict], List[Dict], List[Dict]]:
+    """
+    Split sequences at sequence level with stratification by (is_arg, category).
+    Ensures each category group has at least 1 sample in each split if group size >= 3.
+    """
+    if ratios is None:
+        ratios = [0.8, 0.1, 0.1]
+    assert abs(sum(ratios) - 1.0) < 1e-6
+    random.seed(seed)
+
+    # Group by (is_arg, category)
+    group_to_seqs = defaultdict(list)
+    for seq in sequences:
+        group_to_seqs[(seq['is_arg'], seq['category'])].append(seq)
+
+    splits = [[], [], []]
+
+    for group_key, group_seqs in group_to_seqs.items():
+        random.shuffle(group_seqs)
+        n = len(group_seqs)
+
+        n_train = int(n * ratios[0])
+        n_val = int(n * ratios[1])
+        n_test = n - n_train - n_val
+
+        # Ensure at least 1 in each split if n >= 3
+        if n >= 3:
+            n_train = max(1, n_train)
+            n_val = max(1, n_val)
+            n_test = max(1, n_test)
+            # Rebalance if overshoot
+            while n_train + n_val + n_test > n:
+                if n_train > 1:
+                    n_train -= 1
+                elif n_val > 1:
+                    n_val -= 1
+                elif n_test > 1:
+                    n_test -= 1
+        else:
+            # For tiny groups, all go to train
+            n_train = n
+            n_val = 0
+            n_test = 0
+
+        splits[0].extend(group_seqs[:n_train])
+        splits[1].extend(group_seqs[n_train:n_train + n_val])
+        splits[2].extend(group_seqs[n_train + n_val:])
+
+    return splits[0], splits[1], splits[2]
+
 
 def stratified_family_split(
     families: List[int],
     family_to_sequences: Dict[int, List[Dict]],
-    train_ratio: float = 0.8,
-    val_ratio: float = 0.2,
+    ratios: List[float] = None,
     seed: int = 42
-) -> Tuple[List[int], List[int]]:
+) -> Tuple[List[int], List[int], List[int]]:
     """
-    Split a list of families into train/val with stratification.
+    Split families into train/val/test with stratification.
     Stratification key = (is_arg, category) based on majority label in family.
-    Uses greedy balancing to respect target ratio while keeping stratification.
+    Uses greedy balancing with global targets to respect ratios.
     """
-    assert abs(train_ratio + val_ratio - 1.0) < 1e-6
+    if ratios is None:
+        ratios = [0.8, 0.1, 0.1]
+    assert abs(sum(ratios) - 1.0) < 1e-6
     random.seed(seed)
 
     # Determine majority label for each family
@@ -394,145 +487,179 @@ def stratified_family_split(
     for fam in families:
         group_to_fams[family_labels[fam]].append(fam)
 
-    train_fams, val_fams = [], []
+    # Compute global targets
+    total_seqs = sum(len(family_to_sequences[f]) for f in families)
+    total_args = sum(sum(1 for s in family_to_sequences[f] if s['is_arg'] == 1) for f in families)
+    target_seqs = [int(total_seqs * r) for r in ratios]
+    target_args = [int(total_args * r) for r in ratios]
+    target_seqs[0] = total_seqs - sum(target_seqs[1:])
+    target_args[0] = total_args - sum(target_args[1:])
 
-    for group_key, group_fams in group_to_fams.items():
-        n = len(group_fams)
-        if n < 2:
-            train_fams.extend(group_fams)
-            continue
+    splits = [[], [], []]  # train, val, test
+    split_seq_counts = [0, 0, 0]
+    split_arg_counts = [0, 0, 0]
 
+    # First pass: greedy assignment per group (shuffled order)
+    group_keys = list(group_to_fams.keys())
+    random.shuffle(group_keys)
+
+    for group_key in group_keys:
+        group_fams = group_to_fams[group_key]
         # Sort families by size descending for greedy assignment
         fams_sorted = sorted(group_fams, key=lambda f: len(family_to_sequences[f]), reverse=True)
 
-        # Greedy split into train and val respecting target ratio
-        target_train_ratio = train_ratio / (train_ratio + val_ratio)
-        train_size, val_size = 0, 0
         for fam in fams_sorted:
             fam_seqs = family_to_sequences[fam]
             fam_size = len(fam_seqs)
-            if train_size == 0:
-                train_fams.append(fam)
-                train_size += fam_size
-            else:
-                current_train_ratio = train_size / (train_size + val_size)
-                if current_train_ratio < target_train_ratio:
-                    train_fams.append(fam)
-                    train_size += fam_size
-                else:
-                    val_fams.append(fam)
-                    val_size += fam_size
+            fam_arg = sum(1 for s in fam_seqs if s['is_arg'] == 1)
 
-    return train_fams, val_fams
+            best_idx = 0
+            best_score = -float('inf')
+            for i in range(3):
+                seq_deficit = target_seqs[i] - split_seq_counts[i]
+                arg_deficit = target_args[i] - split_arg_counts[i]
+                score = seq_deficit + 10.0 * arg_deficit
+                if score > best_score:
+                    best_score = score
+                    best_idx = i
+
+            splits[best_idx].append(fam)
+            split_seq_counts[best_idx] += fam_size
+            split_arg_counts[best_idx] += fam_arg
+
+    # Second pass: iterative repair coverage - ensure each group appears in all 3 splits
+    for _ in range(10):  # Max 10 iterations to converge
+        all_covered = True
+        for group_key in group_to_fams.keys():
+            # Identify which splits have this group
+            split_has_group = []
+            for i in range(3):
+                has_it = any(family_labels.get(f) == group_key for f in splits[i])
+                split_has_group.append(has_it)
+
+            missing_splits = [i for i, has in enumerate(split_has_group) if not has]
+            if not missing_splits:
+                continue
+
+            all_covered = False
+            for missing_idx in missing_splits:
+                # Find the smallest family from splits that DO have this group
+                candidates = []
+                for i in range(3):
+                    if split_has_group[i]:
+                        for fam in splits[i]:
+                            if family_labels.get(fam) == group_key:
+                                candidates.append((fam, i, len(family_to_sequences[fam])))
+
+                if not candidates:
+                    continue  # Group has fewer families than splits - cannot cover all
+
+                # Move the smallest candidate
+                candidates.sort(key=lambda x: x[2])
+                move_fam, from_idx, _ = candidates[0]
+
+                # Remove from source
+                splits[from_idx].remove(move_fam)
+                split_seq_counts[from_idx] -= len(family_to_sequences[move_fam])
+                split_arg_counts[from_idx] -= sum(1 for s in family_to_sequences[move_fam] if s['is_arg'] == 1)
+
+                # Add to destination
+                splits[missing_idx].append(move_fam)
+                split_seq_counts[missing_idx] += len(family_to_sequences[move_fam])
+                split_arg_counts[missing_idx] += sum(1 for s in family_to_sequences[move_fam] if s['is_arg'] == 1)
+
+                # Update tracking for next missing split in same group
+                split_has_group[from_idx] = any(family_labels.get(f) == group_key for f in splits[from_idx])
+                split_has_group[missing_idx] = True
+
+        if all_covered:
+            break
+
+    return splits[0], splits[1], splits[2]
 
 
-def create_groupkfold_splits(
+def create_train_val_test_split(
     sequences: List[Dict],
     seq_to_family: Dict[int, int],
-    n_splits: int = 5,
-    train_val_seed: int = 42,
+    output_dir: str,
+    ratios: List[float] = None,
+    rare_threshold: int = 3,
     seed: int = 42
-) -> List[Dict[str, List[Dict]]]:
+) -> Dict:
     """
-    Create 5-fold splits using GroupKFold approach.
-
-    Following DefensePredictor methodology:
-    - All families are divided into 5 fold-groups using greedy balancing
-    - Each fold i uses:
-        * test = all sequences from fold-group i (1 fold = ~20% of data)
-        * train + val = all sequences from the remaining 4 fold-groups (~80%)
-        * Within train+val, split 80/20 into train and val using family-level stratification
-    - Homologous families never cross splits
-
-    Returns:
-        List of 5 dicts, each with keys: 'train', 'val', 'test', 'train_families', 'val_families', 'test_families'
+    Create a single train/val/test split with family-level homology constraint
+    and rare category handling.
     """
+    if ratios is None:
+        ratios = [0.8, 0.1, 0.1]
     random.seed(seed)
 
-    # Build family -> sequences mapping for all families
+    # Build family -> sequences mapping
     family_to_sequences = defaultdict(list)
     for seq in sequences:
         fam = seq_to_family.get(seq['_uid'])
         if fam is not None:
             family_to_sequences[fam].append(seq)
 
-    all_families = sorted(list(family_to_sequences.keys()))
+    # Identify rare categories
+    rare_categories = identify_rare_categories(family_to_sequences, rare_threshold)
+    if rare_categories:
+        logger.info(f"Rare categories (\u003c{rare_threshold} families): {sorted(rare_categories)}")
 
-    # Determine stratification key for each family
-    family_labels = {}
-    for fam in all_families:
-        seqs = family_to_sequences[fam]
-        labels = [(s['is_arg'], s['category']) for s in seqs]
-        majority = Counter(labels).most_common(1)[0][0]
-        family_labels[fam] = majority
+    # Extract rare sequences
+    rare_pool, common_families = extract_rare_sequences(family_to_sequences, rare_categories)
+    logger.info(f"Rare pool: {len(rare_pool)} sequences extracted")
+    logger.info(f"Common families: {len(common_families)} families remaining")
 
-    # Group families by stratification key, then create n_splits groups
-    # Use greedy balancing to keep each chunk roughly equal in size and pos count
-    group_to_fams = defaultdict(list)
-    for fam in all_families:
-        group_to_fams[family_labels[fam]].append(fam)
+    # Split common families at family level
+    common_family_ids = list(common_families.keys())
+    train_fams, val_fams, test_fams = stratified_family_split(
+        common_family_ids, common_families, ratios=ratios, seed=seed
+    )
 
-    fold_chunks = [[] for _ in range(n_splits)]
-    fold_chunk_pos_counts = [0 for _ in range(n_splits)]
-    fold_chunk_total_counts = [0 for _ in range(n_splits)]
+    # Split rare pool at sequence level
+    rare_train, rare_val, rare_test = sequence_level_stratified_split(
+        rare_pool, ratios=ratios, seed=seed + 1
+    )
 
-    for group_key, fams in group_to_fams.items():
-        # Sort families by total sequence count descending (largest first)
-        fams_sorted = sorted(fams, key=lambda f: len(family_to_sequences[f]), reverse=True)
-        for fam in fams_sorted:
-            fam_seqs = family_to_sequences[fam]
-            fam_pos = sum(1 for s in fam_seqs if s['is_arg'] == 1)
-            # Greedy: assign to chunk with smallest (pos_count + total_count) sum
-            scores = [fold_chunk_pos_counts[i] + fold_chunk_total_counts[i] * 0.01 for i in range(n_splits)]
-            best_idx = scores.index(min(scores))
-            fold_chunks[best_idx].append(fam)
-            fold_chunk_pos_counts[best_idx] += fam_pos
-            fold_chunk_total_counts[best_idx] += len(fam_seqs)
+    # Collect sequences
+    train_seqs = [s for fam in train_fams for s in common_families[fam]] + rare_train
+    val_seqs = [s for fam in val_fams for s in common_families[fam]] + rare_val
+    test_seqs = [s for fam in test_fams for s in common_families[fam]] + rare_test
 
-    # Build folds
-    folds = []
-    for i in range(n_splits):
-        test_fams = set(fold_chunks[i])
-        train_val_fams = []
-        for j in range(n_splits):
-            if j != i:
-                train_val_fams.extend(fold_chunks[j])
+    # Shuffle
+    random.shuffle(train_seqs)
+    random.shuffle(val_seqs)
+    random.shuffle(test_seqs)
 
-        # Split train_val into train and val (80/20 of the train_val portion)
-        train_fams, val_fams = stratified_family_split(
-            train_val_fams, family_to_sequences,
-            train_ratio=0.8,
-            val_ratio=0.2,
-            seed=train_val_seed + i
-        )
+    # Save
+    save_to_csv(train_seqs, os.path.join(output_dir, 'train.csv'))
+    save_to_csv(val_seqs, os.path.join(output_dir, 'val.csv'))
+    save_to_csv(test_seqs, os.path.join(output_dir, 'test.csv'))
+    save_to_fasta(train_seqs, os.path.join(output_dir, 'train.fasta'))
+    save_to_fasta(val_seqs, os.path.join(output_dir, 'val.fasta'))
+    save_to_fasta(test_seqs, os.path.join(output_dir, 'test.fasta'))
 
-        # Collect sequences
-        train_seqs = []
-        for fam in train_fams:
-            train_seqs.extend(family_to_sequences[fam])
+    logger.info(f"Train: {len(train_seqs)} sequences ({sum(1 for s in train_seqs if s['is_arg']==1)} ARG)")
+    logger.info(f"Val:   {len(val_seqs)} sequences ({sum(1 for s in val_seqs if s['is_arg']==1)} ARG)")
+    logger.info(f"Test:  {len(test_seqs)} sequences ({sum(1 for s in test_seqs if s['is_arg']==1)} ARG)")
 
-        val_seqs = []
-        for fam in val_fams:
-            val_seqs.extend(family_to_sequences[fam])
+    # Build stats
+    def _split_stats(seqs):
+        return {
+            'count': len(seqs),
+            'arg_count': sum(1 for s in seqs if s['is_arg'] == 1),
+            'non_arg_count': sum(1 for s in seqs if s['is_arg'] == 0),
+            'num_families': len(set(seq_to_family.get(s['_uid']) for s in seqs if seq_to_family.get(s['_uid']) is not None))
+        }
 
-        test_seqs = []
-        for fam in test_fams:
-            test_seqs.extend(family_to_sequences[fam])
+    stats = {
+        'train': _split_stats(train_seqs),
+        'val': _split_stats(val_seqs),
+        'test': _split_stats(test_seqs),
+    }
 
-        random.shuffle(train_seqs)
-        random.shuffle(val_seqs)
-        random.shuffle(test_seqs)
-
-        folds.append({
-            'train': train_seqs,
-            'val': val_seqs,
-            'test': test_seqs,
-            'train_families': set(train_fams),
-            'val_families': set(val_fams),
-            'test_families': test_fams
-        })
-
-    return folds
+    return stats
 
 
 # ---------------------------------------------------------------------------
@@ -556,6 +683,8 @@ def main(
     """
     Create unified training dataset with two-stage homology-aware splitting.
     """
+    if n_splits != 5:
+        logger.warning(f"--n-splits={n_splits} is deprecated and ignored. Using single 80:10:10 split.")
     os.makedirs(output_dir, exist_ok=True)
     random.seed(seed)
 
@@ -565,7 +694,7 @@ def main(
     logger.info(f"  Stage 1: MMseqs2 cluster at {stage1_min_seq_id:.0%} identity / {stage1_coverage:.0%} coverage")
     logger.info(f"  Stage 2: MMseqs2 search ({stage2_num_iterations} iterations, sensitivity={stage2_sensitivity})")
     logger.info(f"  Network: Louvain clustering (min_edge_identity={network_min_identity:.0%})")
-    logger.info(f"  Split: {n_splits}-fold GroupKFold (test=1 fold, train+val=4 folds)")
+    logger.info(f"  Split: 80:10:10 train/val/test with rare category handling")
     logger.info(f"  Seed: {seed}")
 
     # ------------------------------------------------------------------
@@ -623,69 +752,15 @@ def main(
     seq_to_family = build_seq_to_family(seq_to_cluster, cluster_to_family)
 
     # ------------------------------------------------------------------
-    # Stage 3: 5-fold GroupKFold on ALL families
+    # Stage 3: Create train/val/test split with rare category handling
     # ------------------------------------------------------------------
-    folds = create_groupkfold_splits(
-        all_sequences, seq_to_family,
-        n_splits=n_splits,
+    logger.info(f"\n[Stage 3] Creating train/val/test split (80:10:10) with rare category handling")
+    split_stats = create_train_val_test_split(
+        all_sequences, seq_to_family, output_dir,
+        ratios=[0.8, 0.1, 0.1],
+        rare_threshold=3,
         seed=seed
     )
-
-    # ------------------------------------------------------------------
-    # Stage 5: Final train/val split for production model
-    # ------------------------------------------------------------------
-    logger.info(f"\n[Step 5] Creating final train/val split for production model")
-
-    # Build family -> sequences mapping for all families
-    family_to_sequences = defaultdict(list)
-    for seq in all_sequences:
-        fam = seq_to_family.get(seq['_uid'])
-        if fam is not None:
-            family_to_sequences[fam].append(seq)
-
-    all_families = sorted(list(family_to_sequences.keys()))
-
-    # Use same stratified_family_split logic as 5-fold, but directly 80/20
-    final_train_fams, final_val_fams = stratified_family_split(
-        all_families, family_to_sequences,
-        train_ratio=0.8, val_ratio=0.2, seed=seed + 999
-    )
-
-    final_train_seqs = []
-    for fam in final_train_fams:
-        final_train_seqs.extend(family_to_sequences[fam])
-
-    final_val_seqs = []
-    for fam in final_val_fams:
-        final_val_seqs.extend(family_to_sequences[fam])
-
-    random.shuffle(final_train_seqs)
-    random.shuffle(final_val_seqs)
-
-    final_dir = os.path.join(output_dir, 'final')
-    os.makedirs(final_dir, exist_ok=True)
-    save_to_csv(final_train_seqs, os.path.join(final_dir, 'train.csv'))
-    save_to_csv(final_val_seqs, os.path.join(final_dir, 'val.csv'))
-    save_to_fasta(final_train_seqs, os.path.join(final_dir, 'train.fasta'))
-    save_to_fasta(final_val_seqs, os.path.join(final_dir, 'val.fasta'))
-    logger.info(f"  Final: train={len(final_train_seqs)}, val={len(final_val_seqs)}")
-
-    # ------------------------------------------------------------------
-    # Save outputs
-    # ------------------------------------------------------------------
-    logger.info(f"\n[Step 6] Saving outputs to {output_dir}/")
-
-    # Save each fold
-    for i, fold in enumerate(folds):
-        fold_dir = os.path.join(output_dir, f'fold_{i}')
-        os.makedirs(fold_dir, exist_ok=True)
-        save_to_csv(fold['train'], os.path.join(fold_dir, 'train.csv'))
-        save_to_csv(fold['val'], os.path.join(fold_dir, 'val.csv'))
-        save_to_csv(fold['test'], os.path.join(fold_dir, 'test.csv'))
-        save_to_fasta(fold['train'], os.path.join(fold_dir, 'train.fasta'))
-        save_to_fasta(fold['val'], os.path.join(fold_dir, 'val.fasta'))
-        save_to_fasta(fold['test'], os.path.join(fold_dir, 'test.fasta'))
-        logger.info(f"  Fold {i}: train={len(fold['train'])}, val={len(fold['val'])}, test={len(fold['test'])}")
 
     # ------------------------------------------------------------------
     # Compute and save statistics
@@ -710,46 +785,8 @@ def main(
             'network_edges': network.number_of_edges(),
             'num_families': len(set(cluster_to_family.values()))
         },
-        'folds': [],
-        'final_split': {
-            'train': {
-                'count': len(final_train_seqs),
-                'arg_count': sum(1 for s in final_train_seqs if s['is_arg'] == 1),
-                'non_arg_count': sum(1 for s in final_train_seqs if s['is_arg'] == 0),
-                'num_families': len(final_train_fams)
-            },
-            'val': {
-                'count': len(final_val_seqs),
-                'arg_count': sum(1 for s in final_val_seqs if s['is_arg'] == 1),
-                'non_arg_count': sum(1 for s in final_val_seqs if s['is_arg'] == 0),
-                'num_families': len(final_val_fams)
-            }
-        }
+        'split': split_stats
     }
-
-    for i, fold in enumerate(folds):
-        fold_stats = {
-            'fold': i,
-            'train': {
-                'count': len(fold['train']),
-                'arg_count': sum(1 for s in fold['train'] if s['is_arg'] == 1),
-                'non_arg_count': sum(1 for s in fold['train'] if s['is_arg'] == 0),
-                'num_families': len(fold['train_families'])
-            },
-            'val': {
-                'count': len(fold['val']),
-                'arg_count': sum(1 for s in fold['val'] if s['is_arg'] == 1),
-                'non_arg_count': sum(1 for s in fold['val'] if s['is_arg'] == 0),
-                'num_families': len(fold['val_families'])
-            },
-            'test': {
-                'count': len(fold['test']),
-                'arg_count': sum(1 for s in fold['test'] if s['is_arg'] == 1),
-                'non_arg_count': sum(1 for s in fold['test'] if s['is_arg'] == 0),
-                'num_families': len(fold['test_families'])
-            }
-        }
-        stats['folds'].append(fold_stats)
 
     stats_path = os.path.join(output_dir, 'training_data_stats.json')
     with open(stats_path, 'w') as f:
@@ -760,7 +797,7 @@ def main(
     logger.info("Training dataset creation complete!")
     logger.info("=" * 70)
 
-    return folds, stats
+    return stats
 
 
 if __name__ == "__main__":
@@ -770,7 +807,7 @@ if __name__ == "__main__":
     parser.add_argument("--positive-fasta", type=str, default="/home/mayue/ARGMind/data/ARG_DB.fasta")
     parser.add_argument("--negative-fasta", type=str, default="/home/mayue/ARGMind/data/Non_ARG_DB.fasta")
     parser.add_argument("--output-dir", type=str, default="/home/mayue/ARGMind/data")
-    parser.add_argument("--n-splits", type=int, default=5, help="Number of folds for cross-validation")
+    parser.add_argument("--n-splits", type=int, default=5, help="Deprecated: no longer used (kept for backward compatibility)")
     parser.add_argument("--stage1-min-seq-id", type=float, default=0.30,
                         help="Stage 1 MMseqs2 clustering identity threshold (default: 0.30)")
     parser.add_argument("--stage1-coverage", type=float, default=0.80)

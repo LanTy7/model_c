@@ -29,19 +29,14 @@ python scripts/create_training_data.py \
 
 ### Training
 
-**Binary classification — K-Fold CV (evaluation):**
-```bash
-python models/binary/train.py --config configs/binary_config.yaml --mode kfold
-```
-
-**Binary classification — Production Model:**
-```bash
-python models/binary/train.py --config configs/binary_config.yaml --mode final
-```
-
-**Binary classification — Single Split (backward compatible):**
+**Binary classification — Evaluation (train/val/test split):**
 ```bash
 python models/binary/train.py --config configs/binary_config.yaml --mode single
+```
+
+**Binary classification — Production Model (train+val combined):**
+```bash
+python models/binary/train.py --config configs/binary_config.yaml --mode final
 ```
 
 **Multi-class classification:**
@@ -75,8 +70,9 @@ python models/multi/predict.py \
 
 - **Data Loading**: Always use CSV `sequence` column, not FASTA ID matching
 - **Data Splitting**: Two-stage homology-aware splitting (MMseqs2 + Louvain) ensures homologous families never cross splits. Run `scripts/create_training_data.py` before training.
-- **K-Fold CV**: Binary training uses `--mode kfold` for 5-fold cross-validation. Checkpoints saved per fold in `checkpoints/binary/fold_{i}/`. Reports averaged test metrics for unbiased performance estimation.
-- **Production Model**: After hyperparameter selection, train final model with `--mode final` on all data (`data/final/`). Saved as `checkpoints/binary/binary_final.pth`.
+- **Data Splitting**: Single 80:10:10 train/val/test split at family level. Rare ARG categories (< 3 families) are extracted and split at sequence level to guarantee coverage.
+- **Evaluation**: Use `--mode single` to train on train set, validate on val set, and evaluate on test set.
+- **Production Model**: Use `--mode final` to train on train+val combined (with internal 90/10 split for early stopping). Saved as `checkpoints/binary/binary_final.pth`.
 - **Multi-class Labels**: Label mapping saved in metadata.json for inference consistency
 - **Class Balancing**: Uses pos_weight (binary) and class_weights + unified FocalLoss (`models/common/losses.py`) for multi-class
 - **AMP**: Uses `torch.cuda.amp` (deprecated warnings are OK)

@@ -526,46 +526,84 @@ def evaluate_novelty_test(
 
 
 def train_final_model(config: dict, logger, device: str):
-    """Train final production model on all data.
+    """Train final production model on all data (train + val combined).
 
-    Uses the final/ train/val split created by create_training_data.py.
-    This model is trained on ~80% of all sequences (all families),
-    with ~20% held out as validation for early stopping and threshold tuning.
+    Combines train.csv and val.csv, then creates an internal 90/10 stratified
+    split for early stopping. The production model sees all available data
+    during training to maximize learning.
     """
-    data_dir = config['data'].get('data_dir', 'data')
-    final_dir = os.path.join(data_dir, 'final')
-    train_csv = os.path.join(final_dir, 'train.csv')
-    val_csv = os.path.join(final_dir, 'val.csv')
+    from sklearn.model_selection import train_test_split
 
-    if not os.path.exists(train_csv):
-        logger.error(f"Final split not found at {train_csv}. "
+    data_dir = config['data'].get('data_dir', 'data')
+    train_csv = os.path.join(data_dir, 'train.csv')
+    val_csv = os.path.join(data_dir, 'val.csv')
+
+    if not os.path.exists(train_csv) or not os.path.exists(val_csv):
+        logger.error(f"Data not found at {train_csv} or {val_csv}. "
                      f"Run create_training_data.py first.")
         return None
 
     logger.info("=" * 60)
     logger.info("Final Production Model Training (All Data)")
     logger.info("=" * 60)
-    logger.info(f"Training data: {train_csv}")
-    logger.info(f"Validation data: {val_csv}")
 
-    history, model_path, best_metric, _ = train_single_fold(
-        config=config,
-        logger=logger,
-        device=device,
-        fold_idx=None,
-        train_csv=train_csv,
-        val_csv=val_csv,
-        test_csv=None,
-        save_name='binary_final.pth'
+    # Combine train + val
+    train_df = pd.read_csv(train_csv)
+    val_df = pd.read_csv(val_csv)
+    combined_df = pd.concat([train_df, val_df], ignore_index=True)
+    logger.info(f"Combined data: {len(combined_df)} sequences "
+                f"({combined_df['is_arg'].sum()} ARG, "
+                f"{len(combined_df) - combined_df['is_arg'].sum()} non-ARG)")
+
+    # Create internal 90/10 stratified split for early stopping
+    prod_train_df, prod_val_df = train_test_split(
+        combined_df,
+        test_size=0.1,
+        stratify=combined_df['is_arg'],
+        random_state=config.get('seed', 42)
     )
+    logger.info(f"Production train: {len(prod_train_df)} sequences")
+    logger.info(f"Production val:   {len(prod_val_df)} sequences")
 
-    logger.info("=" * 60)
-    logger.info("Final production model training completed!")
-    logger.info(f"Best model: {model_path}")
-    logger.info(f"Best validation metric: {best_metric:.4f}")
-    logger.info("=" * 60)
+    # Save temporary CSVs
+    tmp_dir = os.path.join(data_dir, '.tmp_prod')
+    os.makedirs(tmp_dir, exist_ok=True)
+    prod_train_csv = os.path.join(tmp_dir, 'prod_train.csv')
+    prod_val_csv = os.path.join(tmp_dir, 'prod_val.csv')
+    prod_train_df.to_csv(prod_train_csv, index=False)
+    prod_val_df.to_csv(prod_val_csv, index=False)
 
-    return model_path
+    try:
+        history, model_path, best_metric, _ = train_single_fold(
+            config=config,
+            logger=logger,
+            device=device,
+            fold_idx=None,
+            train_csv=prod_train_csv,
+            val_csv=prod_val_csv,
+            test_csv=None,
+            save_name='binary_final.pth'
+        )
+
+        # If single-mode threshold exists, prefer it for inference consistency
+        single_threshold_path = os.path.join(config['paths']['save_dir'], 'threshold.json')
+        if os.path.exists(single_threshold_path):
+            logger.info(f"Single-mode threshold found at {single_threshold_path}. "
+                        f"It will be used for inference.")
+        else:
+            logger.info("No single-mode threshold found. "
+                        "Production model threshold was tuned on prod_val.")
+
+        logger.info("=" * 60)
+        logger.info("Final production model training completed!")
+        logger.info(f"Best model: {model_path}")
+        logger.info(f"Best validation metric: {best_metric:.4f}")
+        logger.info("=" * 60)
+
+        return model_path
+    finally:
+        # Clean up temp files
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def main(config_path: str, mode: str = 'kfold'):

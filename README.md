@@ -20,8 +20,8 @@ Real-world ARG prevalence is ~0.1-1%, but training data is 1:1 balanced. We impl
 
 ### 3. Improved Data Pipeline
 - **Two-Stage Homology-Aware Splitting**: Based on DefensePredictor (Science), uses MMseqs2 at 30% identity for redundancy reduction, followed by sensitive all-vs-all profile search + Louvain network clustering. Ensures distant homologs are kept together for rigorous generalization evaluation.
-- **5-Fold GroupKFold**: Homologous families never cross splits; each fold contains train/val/test with stratified balancing by ARG category.
-- **Final Production Split**: Separate 80/20 train/val split on all families for training the production model after hyperparameter selection.
+- **Single Train/Val/Test Split (80:10:10)**: At family level with stratified balancing by ARG category. Homologous families never cross splits.
+- **Rare Category Handling**: ARG categories with fewer than 3 families are extracted and split at sequence level to guarantee coverage in all splits.
 - **Quality Control**: Retain sequences with X/B/Z/J amino acids (model supports them)
 
 ## Technology Stack
@@ -61,19 +61,19 @@ models/                       # Modular model implementations
     predict.py              # Inference script
 
 scripts/                     # Data preparation and splitting
-  create_training_data.py   # Two-stage homology-aware splitting (MMseqs2 + Louvain + GroupKFold)
+  create_training_data.py   # Two-stage homology-aware splitting (MMseqs2 + Louvain)
 
 data/                        # Dataset storage
-  fold_0/ .. fold_4/        # 5-fold CV splits (train.csv, val.csv, test.csv, .fasta)
-  final/                    # Production model split (train.csv, val.csv, .fasta)
-  train.fasta               # FASTA format (backup)
+  train.csv / train.fasta   # Training set (80%)
+  val.csv / val.fasta       # Validation set (10%)
+  test.csv / test.fasta     # Test set (10%)
   dataset.py                # PyTorch Dataset classes
 
 utils/                       # Utility functions
   sequence_utils.py         # One-hot encoding, sequence indexing
 
 checkpoints/                 # Saved model checkpoints
-  binary/fold_0/ .. fold_4/ # Per-fold checkpoints for k-fold CV evaluation
+  binary/binary_best.pth    # Best model from evaluation (single split)
   binary/binary_final.pth   # Production model trained on all data
   multi/multi_best.pth + metadata.json
 
@@ -115,30 +115,26 @@ python scripts/create_training_data.py \
 ```
 
 This produces:
-- `data/fold_0/` .. `data/fold_4/` — each contains `train.csv`, `val.csv`, `test.csv` for 5-fold CV
-- `data/final/` — contains `train.csv`, `val.csv` for production model training
+- `data/train.csv` / `data/train.fasta` — training set (80%)
+- `data/val.csv` / `data/val.fasta` — validation set (10%)
+- `data/test.csv` / `data/test.fasta` — test set (10%)
 - `data/training_data_stats.json` — comprehensive statistics
 
 ### Training
 
 Training is done via command-line scripts (not notebooks):
 
-**Phase 1: 5-Fold Cross-Validation (Model Evaluation & Hyperparameter Selection)**
+**Phase 1: Model Evaluation (Single Train/Val/Test Split)**
 ```bash
-python models/binary/train.py --config configs/binary_config.yaml --mode kfold
+python models/binary/train.py --config configs/binary_config.yaml --mode single
 ```
-Trains 5 models, each on 4 folds (split into train/val) and tested on 1 held-out fold. Reports averaged test metrics across all folds. Use this to evaluate model architecture and select hyperparameters.
+Trains a model on the train set, validates on the val set for early stopping and threshold tuning, and evaluates on the test set. Use this to evaluate model architecture and select hyperparameters.
 
 **Phase 2: Final Production Model (All Data)**
 ```bash
 python models/binary/train.py --config configs/binary_config.yaml --mode final
 ```
-Trains a single production model on all data (`data/final/train.csv` for training, `data/final/val.csv` for validation/early stopping). Saved as `checkpoints/binary/binary_final.pth`.
-
-**Binary Classification — Single Split (backward compatible):**
-```bash
-python models/binary/train.py --config configs/binary_config.yaml --mode single
-```
+Trains a single production model on train+val combined (with internal 90/10 split for early stopping). Saved as `checkpoints/binary/binary_final.pth`. Uses the threshold tuned during Phase 1 for inference.
 
 **Multi-class Classification:**
 ```bash
@@ -163,12 +159,12 @@ python models/binary/predict.py \
   -o results/predictions.csv
 ```
 
-**Binary Classification (Single Fold Model):**
+**Binary Classification (Evaluation Model):**
 ```bash
 mkdir -p results
 python models/binary/predict.py \
   -i input.fasta \
-  -m checkpoints/binary/fold_0/binary_best.pth \
+  -m checkpoints/binary/binary_best.pth \
   -o results/predictions.csv
 ```
 
@@ -288,14 +284,15 @@ The project uses a **two-stage homology-aware splitting strategy** adapted from 
 - **Output**: "Families" of sequences that may share remote homology
 
 ### Splitting Strategy
-- **5-Fold GroupKFold**: Each family is an atomic group; all sequences in a family go to the same split. All families participate in the 5-fold split (no data discarded).
-- **Stratification**: Families are balanced by `(is_arg, category)` within each fold
-- **Final Production Split**: After 5-fold CV, a separate 80/20 train/val split is created on all families for training the final production model. Uses the same family-level stratification logic.
+- **Single 80:10:10 Split**: At the family level. Each family is an atomic group; all sequences in a family go to the same split.
+- **Stratification**: Families are balanced by `(is_arg, category)` across train/val/test using greedy deficit minimization.
+- **Rare Category Handling**: ARG categories with fewer than 3 families are extracted and split at the sequence level to guarantee coverage in all splits.
+- **Production Model**: After evaluation, train on train+val combined (with internal 90/10 split for early stopping) to maximize learning.
 
 ### Why This Matters
 - Old method (CD-HIT at 70%): Test sequences could still be 71%+ identical to training sequences → inflated performance
 - New method (MMseqs2 at 30% + Louvain): Test sequences are genuinely distant from training → realistic generalization estimate
-- Production model: Trained on all data to maximize learning, while 5-fold CV provides unbiased performance estimate
+- Rare category handling: Ensures the model sees all ARG categories during training, preventing blind spots for underrepresented resistance mechanisms
 
 ## Performance Tuning Tips
 
@@ -325,9 +322,9 @@ The project uses a **two-stage homology-aware splitting strategy** adapted from 
 ## Important Notes
 
 1. **Data Loading**: Always use CSV `sequence` column, not FASTA files, to avoid ID conflicts
-2. **Data Splitting**: Two-stage homology-aware splitting (MMseqs2 + Louvain) replaces old CD-HIT method. Homologous families never cross splits.
-3. **K-Fold CV**: Use `--mode kfold` to run 5-fold cross-validation. Each model trains on 4 folds and tests on 1 held-out fold. Reports averaged test metrics for unbiased performance estimation.
-4. **Production Model**: Use `--mode final` after hyperparameter selection to train on all data (`data/final/`). The 5-fold CV average test metrics are your reported generalization performance.
+2. **Data Splitting**: Two-stage homology-aware splitting (MMseqs2 + Louvain) with single 80:10:10 train/val/test split at family level. Rare categories (< 3 families) are split at sequence level for guaranteed coverage.
+3. **Evaluation**: Use `--mode single` to train on train set, validate on val set, and evaluate on test set. Test metrics are your reported generalization performance.
+4. **Production Model**: Use `--mode final` to train on train+val combined (internal 90/10 split for early stopping). Saved as `checkpoints/binary/binary_final.pth`.
 5. **Model Checkpointing**: Best model saved based on validation PR-AUC (binary) or macro F1 (multi-class). Checkpoints also save optimizer and scheduler state for resumability.
 6. **Random Seeds**: Fixed seed (42) used for reproducibility in training scripts
 7. **Multi-class Labels**: Must handle "Others" category carefully; label mapping saved in metadata.json

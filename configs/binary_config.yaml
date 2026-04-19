@@ -43,9 +43,9 @@ training:
   aecr_lambda_loc: 0.0
 
 data:
-  # K-fold cross-validation mode (two-stage homology-aware splitting)
-  # Set use_kfold: true to train on fold_0/ .. fold_4/ splits
-  use_kfold: true
+  # K-fold cross-validation mode (deprecated, kept for backward compatibility)
+  # Set use_kfold: false to use single train/val/test split
+  use_kfold: false
   data_dir: "data"
   n_splits: 5
 
