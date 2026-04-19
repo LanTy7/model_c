@@ -565,8 +565,58 @@ def evaluate_novelty_test(
         logger.info(f"\nK-fold summary saved to {summary_path}")
 
 
-def main(config_path: str):
-    """Main training function."""
+def train_final_model(config: dict, logger, device: str):
+    """Train final production model on all data.
+
+    Uses the final/ train/val split created by create_training_data.py.
+    This model is trained on ~80% of all sequences (all families),
+    with ~20% held out as validation for early stopping and threshold tuning.
+    """
+    data_dir = config['data'].get('data_dir', 'data')
+    final_dir = os.path.join(data_dir, 'final')
+    train_csv = os.path.join(final_dir, 'train.csv')
+    val_csv = os.path.join(final_dir, 'val.csv')
+
+    if not os.path.exists(train_csv):
+        logger.error(f"Final split not found at {train_csv}. "
+                     f"Run create_training_data.py first.")
+        return None
+
+    logger.info("=" * 60)
+    logger.info("Final Production Model Training (All Data)")
+    logger.info("=" * 60)
+    logger.info(f"Training data: {train_csv}")
+    logger.info(f"Validation data: {val_csv}")
+
+    history, model_path, best_metric, _ = train_single_fold(
+        config=config,
+        logger=logger,
+        device=device,
+        fold_idx=None,
+        train_csv=train_csv,
+        val_csv=val_csv,
+        test_csv=None,
+        save_name='binary_final.pth'
+    )
+
+    logger.info("=" * 60)
+    logger.info("Final production model training completed!")
+    logger.info(f"Best model: {model_path}")
+    logger.info(f"Best validation metric: {best_metric:.4f}")
+    logger.info("=" * 60)
+
+    return model_path
+
+
+def main(config_path: str, mode: str = 'kfold'):
+    """Main training function.
+
+    Args:
+        config_path: Path to config YAML file
+        mode: 'kfold' for 5-fold cross-validation,
+              'final' for production model on all data,
+              'single' for backward-compatible single split
+    """
     # Load config
     config = load_config(config_path)
 
@@ -581,12 +631,12 @@ def main(config_path: str):
     logger.info("=" * 60)
     logger.info(f"Device: {device}")
     logger.info(f"Config: {config_path}")
+    logger.info(f"Mode: {mode}")
 
-    # Determine mode: k-fold or single split
-    use_kfold = config['data'].get('use_kfold', False)
-
-    if use_kfold:
+    if mode == 'kfold':
         train_kfold(config, logger, device)
+    elif mode == 'final':
+        train_final_model(config, logger, device)
     else:
         # Single split mode (backward compatible)
         train_csv = config['data']['train_csv']
@@ -616,6 +666,13 @@ if __name__ == "__main__":
         default="configs/binary_config.yaml",
         help="Path to config file"
     )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default="kfold",
+        choices=["kfold", "final", "single"],
+        help="Training mode: kfold (5-fold CV, default), final (production model on all data), single (backward compatible)"
+    )
     args = parser.parse_args()
 
-    main(args.config)
+    main(args.config, mode=args.mode)

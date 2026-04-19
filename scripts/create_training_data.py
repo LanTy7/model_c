@@ -16,7 +16,9 @@ Pipeline:
   Stage 3: Build homology network + Louvain clustering -> "families"
   Stage 4: 5-fold GroupKFold on all families with stratified balancing
            Each fold: test = 1 fold-group, train+val = remaining 4 fold-groups
-  Output:  fold_0/..fold_4/ (train/val/test) + stats.json
+  Stage 5: Final train/val split (80/20) for production model training
+           Uses same family-level stratification as 5-fold
+  Output:  fold_0/..fold_4/ (train/val/test) + final/ (train/val) + stats.json
 """
 
 import argparse
@@ -630,9 +632,48 @@ def main(
     )
 
     # ------------------------------------------------------------------
+    # Stage 5: Final train/val split for production model
+    # ------------------------------------------------------------------
+    logger.info(f"\n[Step 5] Creating final train/val split for production model")
+
+    # Build family -> sequences mapping for all families
+    family_to_sequences = defaultdict(list)
+    for seq in all_sequences:
+        fam = seq_to_family.get(seq['_uid'])
+        if fam is not None:
+            family_to_sequences[fam].append(seq)
+
+    all_families = sorted(list(family_to_sequences.keys()))
+
+    # Use same stratified_family_split logic as 5-fold, but directly 80/20
+    final_train_fams, final_val_fams = stratified_family_split(
+        all_families, family_to_sequences,
+        train_ratio=0.8, val_ratio=0.2, seed=seed + 999
+    )
+
+    final_train_seqs = []
+    for fam in final_train_fams:
+        final_train_seqs.extend(family_to_sequences[fam])
+
+    final_val_seqs = []
+    for fam in final_val_fams:
+        final_val_seqs.extend(family_to_sequences[fam])
+
+    random.shuffle(final_train_seqs)
+    random.shuffle(final_val_seqs)
+
+    final_dir = os.path.join(output_dir, 'final')
+    os.makedirs(final_dir, exist_ok=True)
+    save_to_csv(final_train_seqs, os.path.join(final_dir, 'train.csv'))
+    save_to_csv(final_val_seqs, os.path.join(final_dir, 'val.csv'))
+    save_to_fasta(final_train_seqs, os.path.join(final_dir, 'train.fasta'))
+    save_to_fasta(final_val_seqs, os.path.join(final_dir, 'val.fasta'))
+    logger.info(f"  Final: train={len(final_train_seqs)}, val={len(final_val_seqs)}")
+
+    # ------------------------------------------------------------------
     # Save outputs
     # ------------------------------------------------------------------
-    logger.info(f"\n[Step 4] Saving outputs to {output_dir}/")
+    logger.info(f"\n[Step 6] Saving outputs to {output_dir}/")
 
     # Save each fold
     for i, fold in enumerate(folds):
@@ -669,7 +710,21 @@ def main(
             'network_edges': network.number_of_edges(),
             'num_families': len(set(cluster_to_family.values()))
         },
-        'folds': []
+        'folds': [],
+        'final_split': {
+            'train': {
+                'count': len(final_train_seqs),
+                'arg_count': sum(1 for s in final_train_seqs if s['is_arg'] == 1),
+                'non_arg_count': sum(1 for s in final_train_seqs if s['is_arg'] == 0),
+                'num_families': len(final_train_fams)
+            },
+            'val': {
+                'count': len(final_val_seqs),
+                'arg_count': sum(1 for s in final_val_seqs if s['is_arg'] == 1),
+                'non_arg_count': sum(1 for s in final_val_seqs if s['is_arg'] == 0),
+                'num_families': len(final_val_fams)
+            }
+        }
     }
 
     for i, fold in enumerate(folds):
