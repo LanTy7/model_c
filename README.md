@@ -21,7 +21,7 @@ Real-world ARG prevalence is ~0.1-1%, but training data is 1:1 balanced. We impl
 ### 3. Improved Data Pipeline
 - **Two-Stage Homology-Aware Splitting**: Based on DefensePredictor (Science), uses MMseqs2 at 30% identity for redundancy reduction, followed by sensitive all-vs-all profile search + Louvain network clustering. Ensures distant homologs are kept together for rigorous generalization evaluation.
 - **5-Fold GroupKFold**: Homologous families never cross splits; each fold contains train/val/test with stratified balancing by ARG category.
-- **Novelty Test Set**: Dedicated test set of families with <30% identity to training pool, for evaluating detection of novel ARG families.
+- **Final Production Split**: Separate 80/20 train/val split on all families for training the production model after hyperparameter selection.
 - **Quality Control**: Retain sequences with X/B/Z/J amino acids (model supports them)
 
 ## Technology Stack
@@ -63,8 +63,8 @@ scripts/                     # Data preparation and splitting
   prepare_training_negatives.py  # Negative sample preparation with filtering
 
 data/                        # Dataset storage
-  fold_0/ .. fold_4/        # 5-fold splits (train.csv, val.csv, test.csv, .fasta)
-  novelty_test.csv          # Novelty test set for novel ARG evaluation
+  fold_0/ .. fold_4/        # 5-fold CV splits (train.csv, val.csv, test.csv, .fasta)
+  final/                    # Production model split (train.csv, val.csv, .fasta)
   train.fasta               # FASTA format (backup)
   dataset.py                # PyTorch Dataset classes
 
@@ -72,8 +72,8 @@ utils/                       # Utility functions
   sequence_utils.py         # One-hot encoding, sequence indexing
 
 checkpoints/                 # Saved model checkpoints
-  binary/fold_0/ .. fold_4/ # Per-fold checkpoints for k-fold CV
-  binary/binary_best.pth    # Single-split best model
+  binary/fold_0/ .. fold_4/ # Per-fold checkpoints for k-fold CV evaluation
+  binary/binary_final.pth   # Production model trained on all data
   multi/multi_best.pth + metadata.json
 
 logs/                        # Training logs
@@ -110,30 +110,33 @@ python scripts/create_training_data.py \
   --n-splits 5 \
   --stage1-min-seq-id 0.30 \
   --stage2-num-iterations 3 \
-  --novelty-threshold 0.30 \
   --seed 42
 ```
 
 This produces:
-- `data/fold_0/` .. `data/fold_4/` — each contains `train.csv`, `val.csv`, `test.csv`
-- `data/novelty_test.csv` — dedicated test set for evaluating novel ARG detection
+- `data/fold_0/` .. `data/fold_4/` — each contains `train.csv`, `val.csv`, `test.csv` for 5-fold CV
+- `data/final/` — contains `train.csv`, `val.csv` for production model training
 - `data/training_data_stats.json` — comprehensive statistics
 
 ### Training
 
 Training is done via command-line scripts (not notebooks):
 
-**Binary Classification — K-Fold CV (recommended):**
+**Phase 1: 5-Fold Cross-Validation (Model Evaluation & Hyperparameter Selection)**
 ```bash
-# Set use_kfold: true in configs/binary_config.yaml
-python models/binary/train.py --config configs/binary_config.yaml
+python models/binary/train.py --config configs/binary_config.yaml --mode kfold
 ```
-Trains 5 models (one per fold), reports averaged metrics, and evaluates all folds on the novelty test set.
+Trains 5 models, each on 4 folds (split into train/val) and tested on 1 held-out fold. Reports averaged test metrics across all folds. Use this to evaluate model architecture and select hyperparameters.
+
+**Phase 2: Final Production Model (All Data)**
+```bash
+python models/binary/train.py --config configs/binary_config.yaml --mode final
+```
+Trains a single production model on all data (`data/final/train.csv` for training, `data/final/val.csv` for validation/early stopping). Saved as `checkpoints/binary/binary_final.pth`.
 
 **Binary Classification — Single Split (backward compatible):**
 ```bash
-# Set use_kfold: false in configs/binary_config.yaml
-python models/binary/train.py --config configs/binary_config.yaml
+python models/binary/train.py --config configs/binary_config.yaml --mode single
 ```
 
 **Multi-class Classification:**
@@ -150,12 +153,21 @@ Note: The default configs (`binary_config.yaml` and `multi_config.yaml`) already
 
 ### Inference
 
-**Binary Classification:**
+**Binary Classification (Production Model):**
 ```bash
 mkdir -p results
 python models/binary/predict.py \
   -i input.fasta \
-  -m checkpoints/binary/binary_best.pth \
+  -m checkpoints/binary/binary_final.pth \
+  -o results/predictions.csv
+```
+
+**Binary Classification (Single Fold Model):**
+```bash
+mkdir -p results
+python models/binary/predict.py \
+  -i input.fasta \
+  -m checkpoints/binary/fold_0/binary_best.pth \
   -o results/predictions.csv
 ```
 
@@ -217,13 +229,15 @@ training:
   lr: 0.002
   weight_decay: 0.02
   patience: 15
-  lambda_aecr: 0.001
+  lambda_aecr: 0.0       # Disabled by default for binary
   aecr_sigma: 3.0
   aecr_lambda_loc: 0.0
-  pos_weight: 15          # Override auto-calculated pos_weight
+  pos_weight: 1           # Focal Loss handles class imbalance
+  use_focal_loss: true
+  focal_alpha: 0.75
+  focal_gamma: 2.0
 
 data:
-  use_kfold: true         # Enable 5-fold cross-validation
   data_dir: "data"
   n_splits: 5
 ```
@@ -272,13 +286,14 @@ The project uses a **two-stage homology-aware splitting strategy** adapted from 
 - **Output**: "Families" of sequences that may share remote homology
 
 ### Splitting Strategy
-- **5-Fold GroupKFold**: Each family is an atomic group; all sequences in a family go to the same split
+- **5-Fold GroupKFold**: Each family is an atomic group; all sequences in a family go to the same split. All families participate in the 5-fold split (no data discarded).
 - **Stratification**: Families are balanced by `(is_arg, category)` within each fold
-- **Novelty Test Set**: Families with maximum identity \< 30% to the training pool are held out as a dedicated novelty test set
+- **Final Production Split**: After 5-fold CV, a separate 80/20 train/val split is created on all families for training the final production model. Uses the same family-level stratification logic.
 
 ### Why This Matters
 - Old method (CD-HIT at 70%): Test sequences could still be 71%+ identical to training sequences → inflated performance
 - New method (MMseqs2 at 30% + Louvain): Test sequences are genuinely distant from training → realistic generalization estimate
+- Production model: Trained on all data to maximize learning, while 5-fold CV provides unbiased performance estimate
 
 ## Performance Tuning Tips
 
@@ -309,9 +324,9 @@ The project uses a **two-stage homology-aware splitting strategy** adapted from 
 
 1. **Data Loading**: Always use CSV `sequence` column, not FASTA files, to avoid ID conflicts
 2. **Data Splitting**: Two-stage homology-aware splitting (MMseqs2 + Louvain) replaces old CD-HIT method. Homologous families never cross splits.
-3. **K-Fold CV**: Binary training supports 5-fold cross-validation via `use_kfold: true` in config. Reports averaged metrics and novelty test performance.
-4. **Novelty Test Set**: Evaluates model's ability to detect ARGs from families with \<30% identity to training data. Essential for assessing true generalization.
-5. **Model Checkpointing**: Best model saved based on validation F2 (binary) or macro F1 (multi-class)
+3. **K-Fold CV**: Use `--mode kfold` to run 5-fold cross-validation. Each model trains on 4 folds and tests on 1 held-out fold. Reports averaged test metrics for unbiased performance estimation.
+4. **Production Model**: Use `--mode final` after hyperparameter selection to train on all data (`data/final/`). The 5-fold CV average test metrics are your reported generalization performance.
+5. **Model Checkpointing**: Best model saved based on validation PR-AUC (binary) or macro F1 (multi-class)
 6. **Random Seeds**: Fixed seed (42) used for reproducibility in training scripts
 7. **Multi-class Labels**: Must handle "Others" category carefully; label mapping saved in metadata.json
 8. **Mixed Precision**: Uses `torch.cuda.amp` (deprecated warnings are OK)

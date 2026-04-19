@@ -29,16 +29,19 @@ python scripts/create_training_data.py \
 
 ### Training
 
-**Binary classification — K-Fold CV (recommended):**
+**Binary classification — K-Fold CV (evaluation):**
 ```bash
-# Set use_kfold: true in configs/binary_config.yaml
-python models/binary/train.py --config configs/binary_config.yaml
+python models/binary/train.py --config configs/binary_config.yaml --mode kfold
+```
+
+**Binary classification — Production Model:**
+```bash
+python models/binary/train.py --config configs/binary_config.yaml --mode final
 ```
 
 **Binary classification — Single Split (backward compatible):**
 ```bash
-# Set use_kfold: false in configs/binary_config.yaml
-python models/binary/train.py --config configs/binary_config.yaml
+python models/binary/train.py --config configs/binary_config.yaml --mode single
 ```
 
 **Multi-class classification:**
@@ -48,11 +51,11 @@ python models/multi/train.py --config configs/multi_config.yaml
 
 ### Inference
 ```bash
-# Binary classification
+# Binary classification (production model)
 mkdir -p results
 python models/binary/predict.py \
   -i input.fasta \
-  -m checkpoints/binary/binary_best.pth \
+  -m checkpoints/binary/binary_final.pth \
   -o results/predictions.csv
 
 # Multi-class classification (requires metadata.json in the same dir as the checkpoint)
@@ -72,8 +75,8 @@ python models/multi/predict.py \
 
 - **Data Loading**: Always use CSV `sequence` column, not FASTA ID matching
 - **Data Splitting**: Two-stage homology-aware splitting (MMseqs2 + Louvain) ensures homologous families never cross splits. Run `scripts/create_training_data.py` before training.
-- **K-Fold CV**: Binary training supports 5-fold cross-validation via `use_kfold: true` in config. Checkpoints saved per fold in `checkpoints/binary/fold_{i}/`.
-- **Novelty Test**: `novelty_test.csv` evaluates true generalization to distant ARG families (<30% identity to training pool).
+- **K-Fold CV**: Binary training uses `--mode kfold` for 5-fold cross-validation. Checkpoints saved per fold in `checkpoints/binary/fold_{i}/`. Reports averaged test metrics for unbiased performance estimation.
+- **Production Model**: After hyperparameter selection, train final model with `--mode final` on all data (`data/final/`). Saved as `checkpoints/binary/binary_final.pth`.
 - **Multi-class Labels**: Label mapping saved in metadata.json for inference consistency
 - **Class Balancing**: Uses pos_weight (binary) and FocalLoss (multi-class)
 - **AMP**: Uses `torch.cuda.amp` (deprecated warnings are OK)
