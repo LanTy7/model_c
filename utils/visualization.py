@@ -157,7 +157,7 @@ def plot_confusion_matrix(
     sns.heatmap(
         cm,
         annot=True,
-        fmt=fmt if not normalize else '.2f',
+        fmt=fmt,
         cmap='Blues',
         xticklabels=class_names,
         yticklabels=class_names,

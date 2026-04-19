@@ -46,6 +46,11 @@ def safe_torch_load(path: str, map_location='cpu'):
     try:
         torch.serialization.add_safe_globals([TrainConfig])
         return torch.load(path, map_location=map_location, weights_only=True)
-    except Exception:
-        # Fallback for older checkpoints or other unpicklable objects
+    except (pickle.UnpicklingError, RuntimeError, TypeError, AttributeError) as e:
+        # Fallback only for serialization-related errors, not all exceptions
+        import logging
+        logging.getLogger(__name__).warning(
+            f"weights_only=True failed ({type(e).__name__}), falling back to weights_only=False. "
+            f"Only load checkpoints from trusted sources."
+        )
         return torch.load(path, map_location=map_location, weights_only=False)

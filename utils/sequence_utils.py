@@ -20,6 +20,14 @@ AA_DICT_EMBED = {aa: i + 1 for i, aa in enumerate(AMINO_ACIDS)}
 AA_DICT_EMBED.update({'X': 21, 'B': 22, 'Z': 23, 'J': 24, 'PAD': 0})
 
 
+def _center_crop(sequence: str, max_length: int) -> str:
+    """Center-crop sequence to max_length, dropping excess from both ends."""
+    if len(sequence) <= max_length:
+        return sequence
+    start = (len(sequence) - max_length) // 2
+    return sequence[start:start + max_length]
+
+
 def one_hot_encode(sequence: str, max_length: int) -> np.ndarray:
     """
     Convert amino acid sequence to one-hot encoding.
@@ -35,10 +43,7 @@ def one_hot_encode(sequence: str, max_length: int) -> np.ndarray:
     if len(sequence) == 0:
         raise ValueError("Cannot encode an empty sequence.")
 
-    # Center crop if sequence is too long
-    if len(sequence) > max_length:
-        start = (len(sequence) - max_length) // 2
-        sequence = sequence[start:start + max_length]
+    sequence = _center_crop(sequence, max_length)
 
     encoding = np.zeros((max_length, 21), dtype=np.float32)
 
@@ -77,10 +82,7 @@ def sequence_to_indices(sequence: str, max_length: int) -> np.ndarray:
     if len(sequence) == 0:
         raise ValueError("Cannot encode an empty sequence.")
 
-    # Center crop if sequence is too long
-    if len(sequence) > max_length:
-        start = (len(sequence) - max_length) // 2
-        sequence = sequence[start:start + max_length]
+    sequence = _center_crop(sequence, max_length)
 
     indices = np.zeros(max_length, dtype=np.int64)
     seq_len = min(len(sequence), max_length)

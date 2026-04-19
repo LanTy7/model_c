@@ -139,7 +139,7 @@ class BaseARGClassifier(nn.Module):
         return logits
 
     def predict_proba(self, x: torch.Tensor) -> torch.Tensor:
-        """Get probability predictions. Subclasses may override for task-specific activation."""
+        """Get raw model output (logits). Subclasses may apply activation for probabilities."""
         logits = self.forward(x, return_attention=False)
         if isinstance(logits, tuple):
             logits = logits[0]

@@ -20,7 +20,9 @@ from utils.sequence_utils import sequence_to_indices
 
 
 def load_threshold_from_file(checkpoint_dir: str) -> tuple:
-    """Load threshold from threshold.json if it exists.
+    """Load threshold from threshold JSON if it exists.
+
+    Prefers metric-specific files (e.g., threshold_f1.json) over generic threshold.json.
 
     Args:
         checkpoint_dir: Directory containing the checkpoint
@@ -28,27 +30,33 @@ def load_threshold_from_file(checkpoint_dir: str) -> tuple:
     Returns:
         Tuple of (threshold_value, source_description) or (None, None) if not found
     """
-    threshold_path = os.path.join(checkpoint_dir, 'threshold.json')
+    # Prefer metric-specific threshold files to avoid ambiguity
+    metric_specific = []
+    generic_path = os.path.join(checkpoint_dir, 'threshold.json')
+    if os.path.isdir(checkpoint_dir):
+        for fname in os.listdir(checkpoint_dir):
+            if fname.startswith('threshold_') and fname.endswith('.json'):
+                metric_specific.append(os.path.join(checkpoint_dir, fname))
 
-    if not os.path.exists(threshold_path):
-        return None, None
+    # Try metric-specific files first, then generic fallback
+    candidates = metric_specific + ([generic_path] if os.path.exists(generic_path) else [])
 
-    try:
-        with open(threshold_path, 'r') as f:
-            data = json.load(f)
+    for threshold_path in candidates:
+        try:
+            with open(threshold_path, 'r') as f:
+                data = json.load(f)
 
-        threshold = data.get('optimal_threshold')
-        tune_metric = data.get('tune_metric', 'unknown')
-        description = data.get('description', '')
+            threshold = data.get('optimal_threshold')
+            tune_metric = data.get('tune_metric', 'unknown')
 
-        if threshold is not None:
-            source = f"threshold.json (metric: {tune_metric})"
-            return float(threshold), source
+            if threshold is not None:
+                source = f"{os.path.basename(threshold_path)} (metric: {tune_metric})"
+                return float(threshold), source
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Warning: Failed to load {os.path.basename(threshold_path)}: {e}")
+            continue
 
-        return None, None
-    except (json.JSONDecodeError, IOError) as e:
-        print(f"Warning: Failed to load threshold.json: {e}")
-        return None, None
+    return None, None
 
 
 def load_model(checkpoint_path: str, device: str = 'cuda' if torch.cuda.is_available() else 'cpu'):
@@ -69,16 +77,15 @@ def load_model(checkpoint_path: str, device: str = 'cuda' if torch.cuda.is_avail
         use_cnn = any('cnn.convs' in k for k in state_dict.keys())
         use_attention = any('backbone.attention' in k for k in state_dict.keys())
 
-        if use_cnn:
-            # Enhanced model with CNN backbone
-            # backbone.bilstm.backbone.lstm... or backbone.backbone.lstm...
-            lstm_key = [k for k in state_dict.keys() if 'lstm.weight_ih_l0' in k and '_reverse' not in k][0]
-            hidden_size = state_dict[lstm_key].shape[0] // 4
-            num_layers = sum(1 for k in state_dict.keys() if 'lstm.weight_ih_l' in k and '_reverse' not in k)
-        else:
-            # Standard model
-            hidden_size = state_dict['backbone.lstm.weight_ih_l0'].shape[0] // 4
-            num_layers = sum(1 for k in state_dict.keys() if 'weight_ih_l' in k and '_reverse' not in k)
+        # Infer hidden size and num_layers from LSTM weights safely
+        hidden_size = 128
+        num_layers = 1
+        for key in state_dict.keys():
+            if 'lstm.weight_ih_l0' in key and '_reverse' not in key:
+                hidden_size = state_dict[key].shape[0] // 4
+                break
+        num_layers = sum(1 for k in state_dict.keys()
+                         if 'lstm.weight_ih_l' in k and '_reverse' not in k)
 
         model_config = {
             'vocab_size': vocab_size,
@@ -132,11 +139,15 @@ def predict_sequences_ensemble(models, sequences, max_length, device, batch_size
     """Predict on a list of sequences using an ensemble of models.
 
     Returns average probabilities across all models.
+    NOTE: Currently uses simple arithmetic mean. For better performance,
+    consider weighting by validation metrics if available.
     """
     all_fold_probs = []
     for model in models:
         probs = predict_sequences(model, sequences, max_length, device, batch_size)
         all_fold_probs.append(probs)
+    if not all_fold_probs:
+        raise ValueError("No models provided for ensemble prediction")
     return np.mean(all_fold_probs, axis=0)
 
 
@@ -222,7 +233,7 @@ def main():
         probs = predict_sequences_ensemble(models, sequences, max_length, args.device, args.batch_size)
     else:
         probs = predict_sequences(models[0], sequences, max_length, args.device, args.batch_size)
-    preds = (probs > threshold).astype(int)
+    preds = (probs >= threshold).astype(int)
 
     # Save results
     results_df = pd.DataFrame({

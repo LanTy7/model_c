@@ -147,7 +147,7 @@ def train_single_fold(
     val_csv: str = None,
     test_csv: str = None,
     save_name: str = 'binary_best.pth'
-) -> Tuple[Dict, str]:
+) -> Tuple[Dict, str, float, Optional[dict]]:
     """Train a single model fold.
 
     Returns:
@@ -273,6 +273,11 @@ def train_single_fold(
 
     logger.info(f"Best model saved to: {trainer.best_model_path}")
     logger.info(f"Best validation metric: {trainer.best_metric:.4f}")
+
+    # Load best checkpoint before threshold tuning and test evaluation
+    if trainer.best_model_path and os.path.exists(trainer.best_model_path):
+        logger.info("Loading best checkpoint for threshold tuning...")
+        trainer.load_checkpoint(trainer.best_model_path)
 
     # Threshold tuning on validation set
     logger.info("Tuning classification threshold on validation set...")

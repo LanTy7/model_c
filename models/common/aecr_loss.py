@@ -88,7 +88,11 @@ class AECRLoss(nn.Module):
 
         return kernel
 
-    def forward(self, attention_weights: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        attention_weights: torch.Tensor,
+        mask: torch.Tensor = None
+    ) -> torch.Tensor:
         """
         Compute AECR loss from attention weights.
 
@@ -96,6 +100,8 @@ class AECRLoss(nn.Module):
             attention_weights: Attention weight tensor of shape
                 (batch, num_heads, seq_len, seq_len). Should be
                 post-softmax attention probabilities (sum to 1).
+            mask: Optional padding mask of shape (batch, seq_len), True for valid positions.
+                  If provided, padded positions are excluded from entropy computation.
 
         Returns:
             Total AECR loss (scalar)
@@ -109,7 +115,15 @@ class AECRLoss(nn.Module):
         # We want attention weights to be concentrated (low entropy)
         # Entropy = -sum(p * log(p)) over the key dimension for each query position
         entropy_per_position = -(p * torch.log(p)).sum(dim=-1)  # (batch, heads, seq_len)
-        entropy_loss = entropy_per_position.mean()
+
+        if mask is not None:
+            # Exclude padded query positions from entropy mean
+            mask_expanded = mask.unsqueeze(1)  # (batch, 1, seq_len)
+            entropy_per_position = entropy_per_position.masked_fill(~mask_expanded, 0.0)
+            valid_count = (mask.sum(dim=1, keepdim=True) * num_heads).clamp(min=1.0)  # (batch, 1)
+            entropy_loss = entropy_per_position.sum() / valid_count.sum()
+        else:
+            entropy_loss = entropy_per_position.mean()
 
         # === Component 2: Local Continuity Constraint ===
         # We want attention to be smooth (nearby positions similar)

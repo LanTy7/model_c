@@ -66,8 +66,11 @@ class FocalLoss(nn.Module):
         probs = torch.sigmoid(inputs)
         p_t = probs * targets + (1 - probs) * (1 - targets)
 
-        # Focal weight
-        alpha_t = self.alpha if self.alpha is not None else 1.0
+        # Focal weight: alpha_t balances positive/negative classes
+        if self.alpha is not None:
+            alpha_t = self.alpha * targets + (1 - self.alpha) * (1 - targets)
+        else:
+            alpha_t = 1.0
         focal_weight = alpha_t * (1 - p_t) ** self.gamma
 
         return (focal_weight * bce_loss).mean()

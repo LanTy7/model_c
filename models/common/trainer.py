@@ -227,7 +227,7 @@ class Trainer:
                     # AECR loss (if enabled and attention weights available)
                     aecr_loss = 0.0
                     if self.aecr_criterion is not None and attention_weights is not None:
-                        aecr_loss = self.aecr_criterion(attention_weights)
+                        aecr_loss = self.aecr_criterion(attention_weights, mask=mask)
                         aecr_loss = aecr_loss * self.config.lambda_aecr
 
                     # Total loss
@@ -264,7 +264,7 @@ class Trainer:
                 # AECR loss (if enabled and attention weights available)
                 aecr_loss = 0.0
                 if self.aecr_criterion is not None and attention_weights is not None:
-                    aecr_loss = self.aecr_criterion(attention_weights)
+                    aecr_loss = self.aecr_criterion(attention_weights, mask=mask)
                     aecr_loss = aecr_loss * self.config.lambda_aecr
 
                 # Total loss
@@ -370,14 +370,15 @@ class Trainer:
 
                 if self.config.use_amp:
                     with autocast():
-                        if model_uses_attention:
-                            outputs, attention_weights = self.model(inputs, mask=mask, return_attention=True)
-                        else:
+                        # Validation: no need for attention weights
+                        if mask is not None:
                             outputs = self.model(inputs, mask=mask)
-                            attention_weights = None
+                        else:
+                            outputs = self.model(inputs)
+                        attention_weights = None
 
                         # Handle shape mismatch for binary classification
-                        is_binary = outputs.dim() == 2 and outputs.shape[1] == 1 and targets.dim() == 1
+                        is_binary = outputs.dim() == 2 and outputs.shape[1] == 1
                         if is_binary:
                             outputs_squeezed = outputs.squeeze(1)
                             task_loss = self.criterion(outputs_squeezed, targets)
@@ -386,20 +387,15 @@ class Trainer:
 
                         loss = task_loss
                 else:
-                    if model_uses_attention:
-                        if mask is not None:
-                            outputs, attention_weights = self.model(inputs, mask=mask, return_attention=True)
-                        else:
-                            outputs, attention_weights = self.model(inputs, return_attention=True)
+                    # Validation: no need for attention weights
+                    if mask is not None:
+                        outputs = self.model(inputs, mask=mask)
                     else:
-                        if mask is not None:
-                            outputs = self.model(inputs, mask=mask)
-                        else:
-                            outputs = self.model(inputs)
-                        attention_weights = None
+                        outputs = self.model(inputs)
+                    attention_weights = None
 
                     # Handle shape mismatch for binary classification
-                    is_binary = outputs.dim() == 2 and outputs.shape[1] == 1 and targets.dim() == 1
+                    is_binary = outputs.dim() == 2 and outputs.shape[1] == 1
                     if is_binary:
                         outputs_squeezed = outputs.squeeze(1)
                         task_loss = self.criterion(outputs_squeezed, targets)

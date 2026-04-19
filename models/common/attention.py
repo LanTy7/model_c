@@ -100,6 +100,8 @@ class SelfAttention(nn.Module):
 
         # Softmax over the last dimension (attention weights sum to 1)
         attn_weights = F.softmax(attn_scores, dim=-1)
+        # Replace NaN from all-masked rows with zeros for numerical stability
+        attn_weights = torch.nan_to_num(attn_weights, nan=0.0)
         attn_weights = self.dropout(attn_weights)
 
         # Apply attention to values

@@ -35,7 +35,7 @@ class BinaryARGClassifier(BaseARGClassifier):
             hidden_size: LSTM hidden size
             num_layers: Number of LSTM layers
             dropout: Dropout probability
-            max_length: Maximum sequence length
+            max_length: Maximum sequence length (unused by model; handled by dataset/preprocessing)
             use_attention: Whether to add self-attention layer after BiLSTM (default: True)
             num_attention_heads: Number of attention heads
             attention_dropout: Dropout for attention weights
@@ -45,7 +45,6 @@ class BinaryARGClassifier(BaseARGClassifier):
         """
         self.vocab_size = vocab_size
         self.embedding_dim = embedding_dim
-        self.max_length = max_length
 
         super().__init__(
             encoder_output_dim=embedding_dim,

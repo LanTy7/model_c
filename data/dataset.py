@@ -10,11 +10,10 @@ from utils.sequence_utils import one_hot_encode, sequence_to_indices
 class BinarySequenceDataset(Dataset):
     """Simple dataset for binary classification using embedding indices."""
 
-    def __init__(self, sequences: List[str], labels: List[int], max_length: int, training: bool = False):
+    def __init__(self, sequences: List[str], labels: List[int], max_length: int):
         self.sequences = sequences
         self.labels = labels
         self.max_length = max_length
-        self.training = training
 
     def __len__(self):
         return len(self.sequences)

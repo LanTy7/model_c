@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
-    roc_auc_score, classification_report, confusion_matrix,
+    roc_auc_score, average_precision_score, classification_report, confusion_matrix,
     precision_recall_fscore_support, balanced_accuracy_score,
     matthews_corrcoef, cohen_kappa_score
 )
@@ -47,21 +47,40 @@ def compute_comprehensive_metrics(
     metrics['recall'] = recall_score(y_true, y_pred, average=average, zero_division=0)
     metrics['f1'] = f1_score(y_true, y_pred, average=average, zero_division=0)
 
+    # Binary-specific metrics: sensitivity, specificity, F2
+    if len(np.unique(y_true)) == 2:
+        tn = int(np.sum((y_true == 0) & (y_pred == 0)))
+        fp = int(np.sum((y_true == 0) & (y_pred == 1)))
+        fn = int(np.sum((y_true == 1) & (y_pred == 0)))
+        tp = int(np.sum((y_true == 1) & (y_pred == 1)))
+        metrics['sensitivity'] = tp / max(tp + fn, 1e-10)
+        metrics['specificity'] = tn / max(tn + fp, 1e-10)
+        prec = metrics['precision'] if average == 'binary' else metrics['precision']
+        rec = metrics['recall'] if average == 'binary' else metrics['recall']
+        if prec + rec > 0:
+            metrics['f2'] = (1 + 2**2) * (prec * rec) / (2**2 * prec + rec)
+        else:
+            metrics['f2'] = 0.0
+
     # Matthews Correlation Coefficient and Cohen's Kappa
     metrics['mcc'] = matthews_corrcoef(y_true, y_pred)
     metrics['cohen_kappa'] = cohen_kappa_score(y_true, y_pred)
 
-    # ROC-AUC
+    # ROC-AUC and PR-AUC (more informative for imbalanced data)
     if y_prob is not None:
         try:
-            if y_prob.ndim == 1 or y_prob.shape[1] == 1:  # Binary
-                metrics['auc'] = roc_auc_score(y_true, y_prob if y_prob.ndim == 1 else y_prob[:, 0])
+            if y_prob.ndim == 1 or (y_prob.ndim == 2 and y_prob.shape[1] == 1):  # Binary
+                y_prob_flat = y_prob if y_prob.ndim == 1 else y_prob[:, 0]
+                metrics['auc'] = roc_auc_score(y_true, y_prob_flat)
+                metrics['pr_auc'] = average_precision_score(y_true, y_prob_flat)
             else:  # Multi-class
                 metrics['auc'] = roc_auc_score(
                     y_true, y_prob, multi_class='ovr', average=average
                 )
+                metrics['pr_auc'] = 0.0
         except ValueError:
             metrics['auc'] = 0.0
+            metrics['pr_auc'] = 0.0
 
     # Per-class metrics
     per_class_precision, per_class_recall, per_class_f1, support = precision_recall_fscore_support(
@@ -200,6 +219,14 @@ def format_metrics_for_display(metrics: Dict[str, Any]) -> str:
 
     if 'auc' in metrics:
         lines.append(f"ROC-AUC:            {metrics['auc']:.4f}")
+    if 'pr_auc' in metrics:
+        lines.append(f"PR-AUC:             {metrics['pr_auc']:.4f}")
+    if 'f2' in metrics:
+        lines.append(f"F2 Score:           {metrics['f2']:.4f}")
+    if 'sensitivity' in metrics:
+        lines.append(f"Sensitivity:        {metrics['sensitivity']:.4f}")
+    if 'specificity' in metrics:
+        lines.append(f"Specificity:        {metrics['specificity']:.4f}")
 
     lines.extend([
         f"MCC:                {metrics.get('mcc', 0):.4f}",
@@ -260,7 +287,8 @@ def find_optimal_threshold(
         >>> print(f"Best threshold: {best_thresh:.3f}, F1: {best_score:.4f}")
     """
     if thresholds is None:
-        thresholds = np.arange(0.01, 1.0, 0.01)
+        # Use sorted unique probabilities for precise threshold search
+        thresholds = np.sort(np.unique(np.concatenate([[0.0, 1.0], y_prob])))
 
     # Store metrics for each threshold
     results = []
