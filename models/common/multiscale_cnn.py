@@ -122,7 +122,7 @@ to capture local patterns at different scales. This is particularly useful
 
         # Apply mask if provided
         if mask is not None:
-            mask = mask.unsqueeze(-1)  # (batch, seq_len, 1)
+            mask = mask.unsqueeze(-1).bool()  # (batch, seq_len, 1)
             output = output.masked_fill(~mask, 0.0)
 
         return output

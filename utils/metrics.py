@@ -316,7 +316,7 @@ def find_optimal_threshold(
             'threshold': thresh,
             'precision': prec,
             'recall': rec,
-            'f1': f_beta if beta == 1.0 else f_beta,  # F1 when beta=1
+            'f1': f_beta if beta == 1.0 else float('nan'),  # F1 only when beta=1
             f'f{beta}': f_beta,
             'youden': youden
         })

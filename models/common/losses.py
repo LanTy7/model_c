@@ -47,10 +47,12 @@ class FocalLoss(nn.Module):
     def _forward_binary(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         # inputs: logits, shape (batch,) or (batch, 1)
         # targets: 0 or 1, shape (batch,) or (batch, 1)
-        if targets.dim() == 1 and inputs.dim() == 2:
-            targets = targets.unsqueeze(1).float()
-        else:
-            targets = targets.float()
+        # Normalize dimensions
+        if inputs.dim() == 1:
+            inputs = inputs.unsqueeze(1)
+        if targets.dim() == 1:
+            targets = targets.unsqueeze(1)
+        targets = targets.float()
 
         # Label smoothing
         smoothed_targets = targets
@@ -62,13 +64,13 @@ class FocalLoss(nn.Module):
             inputs, smoothed_targets, pos_weight=self.pos_weight, reduction='none'
         )
 
-        # p_t: probability of correct class
+        # p_t: probability of correct class (use smoothed targets for consistency)
         probs = torch.sigmoid(inputs)
-        p_t = probs * targets + (1 - probs) * (1 - targets)
+        p_t = probs * smoothed_targets + (1 - probs) * (1 - smoothed_targets)
 
         # Focal weight: alpha_t balances positive/negative classes
         if self.alpha is not None:
-            alpha_t = self.alpha * targets + (1 - self.alpha) * (1 - targets)
+            alpha_t = self.alpha * smoothed_targets + (1 - self.alpha) * (1 - smoothed_targets)
         else:
             alpha_t = 1.0
         focal_weight = alpha_t * (1 - p_t) ** self.gamma

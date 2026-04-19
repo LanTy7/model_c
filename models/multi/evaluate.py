@@ -52,12 +52,20 @@ def load_model(checkpoint_path: str, metadata_path: str, yaml_config: dict, devi
             if 'lstm.weight_ih_l2' in key:
                 num_layers = 3
 
+        use_attention = any('attention' in k for k in state_dict.keys())
+        use_cnn = any('cnn' in k for k in state_dict.keys())
+
         model_config = {
             'input_size': 21,
             'hidden_size': hidden_size,
             'num_layers': num_layers,
             'dropout': 0.4,
-            'num_classes': num_classes
+            'num_classes': num_classes,
+            'use_attention': use_attention,
+            'use_cnn': use_cnn,
+            'num_attention_heads': 8 if use_attention else None,
+            'cnn_out_channels': 64 if use_cnn else None,
+            'cnn_kernel_sizes': [3, 5, 7] if use_cnn else None,
         }
 
     model = MultiClassARGClassifier(**model_config)

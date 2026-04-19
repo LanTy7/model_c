@@ -154,7 +154,7 @@ class AttentionPooling(nn.Module):
         self,
         x: torch.Tensor,
         mask: torch.Tensor = None
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Apply self-attention and return pooled representation.
 

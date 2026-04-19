@@ -9,7 +9,7 @@ import json
 import shutil
 import argparse
 from pathlib import Path
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Optional
 
 import numpy as np
 import pandas as pd
@@ -41,9 +41,9 @@ class LabelSmoothedBCEWithLogitsLoss(nn.Module):
     def forward(self, inputs, targets):
         # targets: 0 or 1, shape (batch,) or (batch, 1)
         # smoothed: 0 -> smoothing/2, 1 -> 1 - smoothing/2
-        if targets.dim() == 1 and inputs.dim() == 2:
+        if targets.dim() == 1:
             targets = targets.unsqueeze(1)
-        targets = targets * (1 - self.smoothing) + self.smoothing * 0.5
+        targets = targets.float() * (1 - self.smoothing) + self.smoothing * 0.5
         return self.bce(inputs, targets).mean()
 
 
@@ -164,7 +164,7 @@ def train_single_fold(
     )
 
     # Create model
-    model_config = {k: v for k, v in config['model'].items() if k != 'name'}
+    model_config = {k: v for k, v in config['model'].items() if k not in ('name', 'max_length')}
     model = BinaryARGClassifier(**model_config)
     logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
 

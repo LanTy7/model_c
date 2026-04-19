@@ -55,6 +55,10 @@ def load_and_preprocess_data(csv_file: str, min_samples: int, logger):
         unique_labels.remove('Others')
         unique_labels.append('Others')
 
+    # Ensure 'Others' always exists for unknown labels in eval/test
+    if 'Others' not in unique_labels:
+        unique_labels.append('Others')
+
     label_to_idx = {label: idx for idx, label in enumerate(unique_labels)}
     idx_to_label = {idx: label for label, idx in label_to_idx.items()}
 

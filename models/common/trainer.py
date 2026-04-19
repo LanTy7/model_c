@@ -675,7 +675,7 @@ class Trainer:
         try:
             torch.serialization.add_safe_globals([TrainConfig])
             checkpoint = torch.load(path, map_location=self.config.device, weights_only=True)
-        except (TypeError, RuntimeError):
+        except (TypeError, RuntimeError, AttributeError):
             # Fallback for older PyTorch or checkpoints with custom objects
             checkpoint = torch.load(path, map_location=self.config.device, weights_only=False)
         self.model.load_state_dict(checkpoint['model_state_dict'])
