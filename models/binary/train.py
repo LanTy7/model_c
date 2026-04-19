@@ -98,8 +98,8 @@ def create_dataloaders(
         logger.info(f"Using auto-calculated pos_weight: {pos_weight:.4f}")
 
     # Create datasets
-    train_dataset = BinarySequenceDataset(train_seqs, train_labels, max_length, training=True)
-    val_dataset = BinarySequenceDataset(val_seqs, val_labels, max_length, training=False)
+    train_dataset = BinarySequenceDataset(train_seqs, train_labels, max_length)
+    val_dataset = BinarySequenceDataset(val_seqs, val_labels, max_length)
 
     # Create dataloaders
     train_loader = DataLoader(
