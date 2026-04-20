@@ -13,7 +13,8 @@ from torch.utils.data import DataLoader
 from torch.cuda.amp import autocast, GradScaler
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
-    roc_auc_score, average_precision_score, confusion_matrix
+    roc_auc_score, average_precision_score, confusion_matrix,
+    balanced_accuracy_score
 )
 
 
@@ -147,7 +148,12 @@ class Trainer:
             'val_precision': [],
             'val_recall': [],
             'val_f1': [],
-            'val_auc': []
+            'val_auc': [],
+            'val_balanced_accuracy': [],
+            'val_arg_precision': [],
+            'val_arg_recall': [],
+            'val_specificity': [],
+            'val_pr_auc': []
         }
         self.best_metric = -float('inf')
         self.best_model_path = None
@@ -451,12 +457,26 @@ class Trainer:
                 metrics['pr_auc'] = average_precision_score(targets, probs)
             except ValueError:
                 metrics['pr_auc'] = 0.0
+
+            # Binary-specific detailed metrics for imbalanced data
+            metrics['balanced_accuracy'] = balanced_accuracy_score(targets, preds)
+            metrics['arg_precision'] = precision_score(targets, preds, pos_label=1, zero_division=0)
+            metrics['arg_recall'] = recall_score(targets, preds, pos_label=1, zero_division=0)
+
+            # Specificity = recall of negative class
+            tn = int(np.sum((targets == 0) & (preds == 0)))
+            fp = int(np.sum((targets == 0) & (preds == 1)))
+            metrics['specificity'] = tn / max(tn + fp, 1e-10)
         else:  # Multi-class
             try:
                 metrics['auc'] = roc_auc_score(targets, probs, multi_class='ovr', average='macro')
             except ValueError:
                 metrics['auc'] = 0.0
             metrics['pr_auc'] = 0.0
+            metrics['balanced_accuracy'] = 0.0
+            metrics['arg_precision'] = 0.0
+            metrics['arg_recall'] = 0.0
+            metrics['specificity'] = 0.0
 
         return metrics
 
@@ -509,14 +529,23 @@ class Trainer:
             self.history['val_recall'].append(val_metrics.get('recall', 0))
             self.history['val_f1'].append(val_metrics.get('f1', 0))
             self.history['val_auc'].append(val_metrics.get('auc', 0))
+            self.history['val_balanced_accuracy'].append(val_metrics.get('balanced_accuracy', 0))
+            self.history['val_arg_precision'].append(val_metrics.get('arg_precision', 0))
+            self.history['val_arg_recall'].append(val_metrics.get('arg_recall', 0))
+            self.history['val_specificity'].append(val_metrics.get('specificity', 0))
+            self.history['val_pr_auc'].append(val_metrics.get('pr_auc', 0))
 
             # Log
             epoch_time = time.time() - start_time
             self.logger.info(
                 f"Epoch {epoch+1:03d}/{self.config.epochs} | "
                 f"Loss: {train_loss:.4f}/{val_loss:.4f} | "
-                f"Acc: {val_metrics['accuracy']:.4f} | "
-                f"F1: {val_metrics['f1']:.4f} | "
+                f"BalAcc: {val_metrics.get('balanced_accuracy', 0):.4f} | "
+                f"ARG-P/R/F1: {val_metrics.get('arg_precision', 0):.4f}/"
+                f"{val_metrics.get('arg_recall', 0):.4f}/"
+                f"{val_metrics.get('f1', 0):.4f} | "
+                f"Spec: {val_metrics.get('specificity', 0):.4f} | "
+                f"PR-AUC: {val_metrics.get('pr_auc', 0):.4f} | "
                 f"LR: {self.history['lr'][-1]:.6f} | "
                 f"Time: {epoch_time:.1f}s"
             )
