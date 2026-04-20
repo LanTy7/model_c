@@ -1,5 +1,6 @@
 """Shared training framework for ARG classification models."""
 import os
+import pickle
 import time
 import logging
 from typing import Dict, List, Optional, Callable, Any
@@ -675,8 +676,8 @@ class Trainer:
         try:
             torch.serialization.add_safe_globals([TrainConfig])
             checkpoint = torch.load(path, map_location=self.config.device, weights_only=True)
-        except (TypeError, RuntimeError, AttributeError):
-            # Fallback for older PyTorch or checkpoints with custom objects
+        except (pickle.UnpicklingError, TypeError, RuntimeError, AttributeError):
+            # Fallback for older PyTorch or checkpoints with custom objects (e.g., numpy scalars)
             checkpoint = torch.load(path, map_location=self.config.device, weights_only=False)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         if 'optimizer_state_dict' in checkpoint:
