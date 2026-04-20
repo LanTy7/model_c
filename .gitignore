@@ -12,6 +12,7 @@ data/
 checkpoints/
 figures/
 logs/
+results/
 
 # Unrelated files
 .claude/
