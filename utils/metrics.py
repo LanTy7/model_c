@@ -287,8 +287,8 @@ def find_optimal_threshold(
         >>> print(f"Best threshold: {best_thresh:.3f}, F1: {best_score:.4f}")
     """
     if thresholds is None:
-        # Use sorted unique probabilities for precise threshold search
-        thresholds = np.sort(np.unique(np.concatenate([[0.0, 1.0], y_prob])))
+        # Use a fixed grid of 200 thresholds for efficient search
+        thresholds = np.linspace(0.0, 1.0, 201)
 
     # Store metrics for each threshold
     results = []
