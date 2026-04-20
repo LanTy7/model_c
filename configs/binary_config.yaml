@@ -28,13 +28,16 @@ training:
   label_smoothing: 0.1
 
   # Loss function: Focal Loss (recommended for extreme imbalance)
+  # BalancedRandomSampler already balances batches; keep alpha neutral (0.5)
+  # to avoid stacking class weighting on top of balanced sampling.
   use_focal_loss: true
-  focal_alpha: 0.9
+  focal_alpha: 0.5
   focal_gamma: 1.0
 
   # Class imbalance handling
-  # pos_weight scales BCE loss for positive class; set ~10 for 1:10 imbalance
-  pos_weight: 10.0
+  # pos_weight is kept at 1.0 because WeightedRandomSampler already
+  # ensures balanced batches; no further loss-level reweighting needed.
+  pos_weight: 1.0
 
   # AECR regularization (disabled by default — conflicts with sparse protein features)
   lambda_aecr: 0.0
