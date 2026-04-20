@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -101,11 +101,21 @@ def create_dataloaders(
     train_dataset = BinarySequenceDataset(train_seqs, train_labels, max_length)
     val_dataset = BinarySequenceDataset(val_seqs, val_labels, max_length)
 
+    # WeightedRandomSampler for class-balanced batches (Layer 1 fix)
+    weight_for_pos = n_neg / max(n_pos, 1)
+    sample_weights = [weight_for_pos if label == 1 else 1.0 for label in train_labels]
+    sampler = WeightedRandomSampler(
+        weights=sample_weights,
+        num_samples=len(train_labels),
+        replacement=True
+    )
+    logger.info(f"Using WeightedRandomSampler: positive weight={weight_for_pos:.2f}")
+
     # Create dataloaders
     train_loader = DataLoader(
         train_dataset,
         batch_size=config['training']['batch_size'],
-        shuffle=True,
+        sampler=sampler,
         num_workers=config['training']['num_workers'],
         persistent_workers=config['training']['num_workers'] > 0,
         pin_memory=True
@@ -248,11 +258,11 @@ def train_single_fold(
         aecr_lambda_loc=training_config.get('aecr_lambda_loc', 0.5)
     )
 
-    # Define metric function for early stopping (use validation PR-AUC)
+    # Define metric function for early stopping (use validation Balanced Accuracy)
     def val_metric_fn(targets, preds, probs):
-        from sklearn.metrics import average_precision_score
+        from sklearn.metrics import balanced_accuracy_score
         try:
-            return average_precision_score(targets, probs)
+            return balanced_accuracy_score(targets, preds)
         except ValueError:
             return 0.0
 
